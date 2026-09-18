@@ -47,6 +47,7 @@ provider's model). The shape:
     "numCtx": 8192,
     "maxOutputTokens": 4096,
     "reasoningEffort": "medium",
+    "think": "medium",
   },
   "perModel": {
     "gpt-oss:20b": { "numCtx": 32768, "reasoningEffort": "high" },
@@ -58,6 +59,13 @@ provider's model). The shape:
 - `maxOutputTokens` — positive integer, overrides whichever max-tokens
   field the built-in adapter set (`max_tokens` or `max_completion_tokens`).
 - `reasoningEffort` — `"low" | "medium" | "high"`, sets `reasoning_effort`.
+- `think` — `boolean | "low" | "medium" | "high"`, sets `think` so a
+  thinking-capable model (`gpt-oss`, `qwen3`, ...) returns its reasoning in
+  the response's native `message.reasoning` field instead of inline
+  `<think>…</think>` tags in `content`. Verified directly against a local
+  Ollama on the OpenAI-compatible endpoint: `think` set to `"high"`
+  produces a `reasoning` field with no `<think>` tags anywhere in
+  `content`.
 
 A per-model entry wins field-by-field over `default`; an unconfigured
 field falls through to the built-in adapter's own behavior (no override).

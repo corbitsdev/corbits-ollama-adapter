@@ -99,6 +99,20 @@ describe("createOllamaAdapter", () => {
     expect(bodyOf(built)["reasoning_effort"]).toBe("high");
   });
 
+  test("a configured think override appears in the built request body", () => {
+    const wrapped = createOllamaAdapter(source, {
+      default: { think: "high" },
+    });
+    const built = wrapped.buildRequest(messages, "gpt-oss:20b", options);
+    expect(bodyOf(built)["think"]).toBe("high");
+  });
+
+  test("an unconfigured think override is omitted from the built request body", () => {
+    const wrapped = createOllamaAdapter(source, {});
+    const built = wrapped.buildRequest(messages, "gpt-oss:20b", options);
+    expect(bodyOf(built)).not.toHaveProperty("think");
+  });
+
   test("a per-model override beats the general default", () => {
     const wrapped = createOllamaAdapter(source, {
       default: { numCtx: 8192 },

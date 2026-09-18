@@ -42,6 +42,7 @@ type OllamaChatBody = {
   max_tokens?: number;
   max_completion_tokens?: number;
   reasoning_effort?: string;
+  think?: boolean | string;
   stream_options?: { include_usage: boolean };
 };
 
@@ -69,6 +70,9 @@ function applyOverride(
   }
   if (override.reasoningEffort !== undefined) {
     body.reasoning_effort = override.reasoningEffort;
+  }
+  if (override.think !== undefined) {
+    body.think = override.think;
   }
   return { ...built, body: JSON.stringify(body) };
 }

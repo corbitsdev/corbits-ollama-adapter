@@ -3,6 +3,7 @@ export {
   OllamaAdapterConfig,
   OllamaAdapterOverride,
   ReasoningEffort,
+  Think,
   parseOllamaAdapterConfig,
   resolveOverride,
 } from "./overrides";

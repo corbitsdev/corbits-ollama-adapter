@@ -26,6 +26,21 @@ describe("parseOllamaAdapterConfig", () => {
     ).toThrow();
   });
 
+  test("accepts a boolean or effort-string think value", () => {
+    expect(() =>
+      parseOllamaAdapterConfig({ default: { think: true } }),
+    ).not.toThrow();
+    expect(() =>
+      parseOllamaAdapterConfig({ default: { think: "high" } }),
+    ).not.toThrow();
+  });
+
+  test("rejects a think value outside boolean or the closed effort set", () => {
+    expect(() =>
+      parseOllamaAdapterConfig({ default: { think: "extreme" } }),
+    ).toThrow();
+  });
+
   test("accepts a well-formed default and perModel config", () => {
     const parsed = OllamaAdapterConfig({
       default: { numCtx: 8192 },
@@ -67,5 +82,14 @@ describe("resolveOverride", () => {
     });
     expect(resolveOverride(config, "gpt-oss:20b").reasoningEffort).toBe("high");
     expect(resolveOverride(config, "qwen3.8:27b").reasoningEffort).toBe("low");
+  });
+
+  test("think resolves the same way", () => {
+    const config = parseOllamaAdapterConfig({
+      default: { think: false },
+      perModel: { "gpt-oss:20b": { think: "high" } },
+    });
+    expect(resolveOverride(config, "gpt-oss:20b").think).toBe("high");
+    expect(resolveOverride(config, "qwen3.8:27b").think).toBe(false);
   });
 });
