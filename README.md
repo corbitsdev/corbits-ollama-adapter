@@ -63,3 +63,15 @@ A per-model entry wins field-by-field over `default`; an unconfigured
 field falls through to the built-in adapter's own behavior (no override).
 With no `quirks` at all, the built request body is byte-for-byte
 equivalent to the built-in OpenAI adapter's.
+
+## Vision: `@intx/types` already carries an image part
+
+`@intx/types`'s runtime `ContentBlock` union (`packages/types/src/runtime.ts`
+at the pinned `0.3.0`) already has an `image` variant carrying a
+`MediaSource` (`base64` / `url` / `file-reference`) — there is no gap to
+ask upstream to fill. It is already wired end to end on this adapter's
+path: the built-in OpenAI adapter marshals a `base64` `MediaSource` into
+Ollama's `image_url: { url: "data:<mimeType>;base64,<data>" }` shape
+unchanged, which this package's own `buildRequest` leaves untouched (a
+separate change rejects the `url` and `file-reference` variants, which
+Ollama's endpoint accepts on the wire but never actually reads).

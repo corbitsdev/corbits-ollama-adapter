@@ -235,4 +235,30 @@ describe("createOllamaAdapter", () => {
       source,
     });
   });
+
+  test("a base64 image ContentBlock marshals to Ollama's image_url data-URL shape", () => {
+    const wrapped = createOllamaAdapter(source, undefined);
+    const withImage: ConversationTurn[] = [
+      {
+        role: "user",
+        timestamp: 0,
+        content: [
+          { type: "text", text: "what is this?" },
+          {
+            type: "image",
+            source: { kind: "base64", mimeType: "image/png", data: "Zm9v" },
+          },
+        ],
+      },
+    ];
+    const built = wrapped.buildRequest(withImage, "gpt-oss:20b", options);
+    const body = bodyOf(built);
+    const wireMessages = body["messages"] as {
+      content: { type: string; image_url?: { url: string } }[];
+    }[];
+    const imagePart = wireMessages[0]?.content.find(
+      (part) => part.type === "image_url",
+    );
+    expect(imagePart?.image_url?.url).toBe("data:image/png;base64,Zm9v");
+  });
 });
