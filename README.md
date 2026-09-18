@@ -63,3 +63,15 @@ A per-model entry wins field-by-field over `default`; an unconfigured
 field falls through to the built-in adapter's own behavior (no override).
 With no `quirks` at all, the built request body is byte-for-byte
 equivalent to the built-in OpenAI adapter's.
+
+## Parameters Ollama silently drops
+
+Ollama's OpenAI-compatible endpoint accepts `tool_choice`, `logit_bias`,
+`user`, and `n` on the wire without error, but does not apply any of them
+— confirmed directly against a local Ollama: a bogus `tool_choice`, a
+`logit_bias` entry, a `user` field, and `n: 3` all return a normal 200
+with exactly one choice, no error, no effect. A caller relying on any of
+these would silently get different behavior than requested with nothing
+to signal it. `buildRequest` rejects a `providerOptions` bag carrying any
+of these four keys with an error naming the parameter, rather than let
+the request through as a silent no-op.

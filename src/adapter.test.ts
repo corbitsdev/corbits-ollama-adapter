@@ -235,4 +235,25 @@ describe("createOllamaAdapter", () => {
       source,
     });
   });
+
+  test.each(["tool_choice", "logit_bias", "user", "n"])(
+    "buildRequest rejects providerOptions.%s rather than silently dropping it",
+    (key) => {
+      const wrapped = createOllamaAdapter(source, undefined);
+      expect(() =>
+        wrapped.buildRequest(messages, "gpt-oss:20b", {
+          providerOptions: { [key]: "anything" },
+        }),
+      ).toThrow(key);
+    },
+  );
+
+  test("buildRequest accepts providerOptions with none of the dropped keys", () => {
+    const wrapped = createOllamaAdapter(source, undefined);
+    expect(() =>
+      wrapped.buildRequest(messages, "gpt-oss:20b", {
+        providerOptions: { somethingElse: true },
+      }),
+    ).not.toThrow();
+  });
 });

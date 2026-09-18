@@ -45,6 +45,34 @@ type OllamaChatBody = {
   stream_options?: { include_usage: boolean };
 };
 
+// Parameters Ollama's OpenAI-compatible endpoint accepts on the wire but
+// silently ignores rather than rejecting
+// (docs.ollama.com/api/openai-compatibility.md). A caller relying on any of
+// these to actually change model behavior would get no error and no
+// effect; failing loudly at the adapter boundary is better than a request
+// that "succeeds" while doing something other than what was asked.
+const SILENTLY_DROPPED_PROVIDER_OPTIONS = [
+  "tool_choice",
+  "logit_bias",
+  "user",
+  "n",
+] as const;
+
+function rejectSilentlyDroppedProviderOptions(
+  providerOptions: Record<string, unknown> | undefined,
+): void {
+  if (providerOptions === undefined) return;
+  for (const key of SILENTLY_DROPPED_PROVIDER_OPTIONS) {
+    if (Object.hasOwn(providerOptions, key)) {
+      throw new Error(
+        `@corbits/ollama-adapter: providerOptions.${key} is accepted by ` +
+          `Ollama's OpenAI-compatible endpoint but silently ignored, not ` +
+          `applied; remove it rather than rely on a no-op.`,
+      );
+    }
+  }
+}
+
 function applyOverride(
   built: BuiltRequest,
   override: OllamaAdapterOverride,
@@ -173,6 +201,7 @@ export const createOllamaAdapter: AdapterFactory = (
   return {
     ...inner,
     buildRequest: (messages, model, options) => {
+      rejectSilentlyDroppedProviderOptions(options.providerOptions);
       setDeclaredToolNames(streamInlineState, options.tools);
       setDeclaredToolNames(jsonInlineState, options.tools);
       return applyOverride(
