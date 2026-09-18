@@ -63,3 +63,23 @@ A per-model entry wins field-by-field over `default`; an unconfigured
 field falls through to the built-in adapter's own behavior (no override).
 With no `quirks` at all, the built request body is byte-for-byte
 equivalent to the built-in OpenAI adapter's.
+
+## Ollama Cloud
+
+This adapter works unchanged against Ollama Cloud — it is the same
+OpenAI-compatible surface, just a different base URL and auth scheme. An
+`InferenceSource` pointed at Ollama Cloud instead of a local install
+needs:
+
+- **Base URL**: `https://ollama.com/api/`
+- **Auth**: `Authorization: Bearer <key>`, with the key generated at
+  [ollama.com/settings/keys](https://ollama.com/settings/keys)
+- **Models**: the cloud-hosted catalog is listed at
+  [ollama.com/search?c=cloud](https://ollama.com/search?c=cloud) — it is
+  not the same set as whatever is pulled on a local install
+
+Pricing and rate limits for Ollama Cloud are not documented anywhere in
+`docs.ollama.com`, so this package ships no default cloud source and no
+built-in cost/limit assumptions for it; an operator wiring one up sets
+the base URL, bearer key, and model name explicitly with no
+Ollama-Cloud-specific config from this adapter.
