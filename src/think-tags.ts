@@ -23,10 +23,27 @@ export type ThinkSplitState = {
   everInThink: boolean;
   textAcc: string;
   thinkingAcc: string;
+  /** Set once the built-in OpenAI adapter has already emitted a native
+   * `inference.thinking.delta` for this response (it reads `reasoning`/
+   * `reasoning_content` fields itself — see `providers/openai.js`'s
+   * `reasoningFieldNames` handling). A model given a `think` override
+   * (see overrides.ts) returns its reasoning that way, with no `<think>`
+   * tags anywhere in `content`; regex-splitting `content` on top of an
+   * already-classified native thinking stream is unnecessary and risks
+   * misfiring on a coincidental literal "<think>" in ordinary text. The
+   * tag splitter still runs as-is for a model that ignores `think` and
+   * falls back to inline tags. */
+  nativeThinkingSeen: boolean;
 };
 
 export function createThinkSplitState(): ThinkSplitState {
-  return { inThink: false, everInThink: false, textAcc: "", thinkingAcc: "" };
+  return {
+    inThink: false,
+    everInThink: false,
+    textAcc: "",
+    thinkingAcc: "",
+    nativeThinkingSeen: false,
+  };
 }
 
 const THINK_OPEN = "<think>";
@@ -99,7 +116,18 @@ export function reclassifyThinkingEvents(
   const output: InferenceEvent[] = [];
 
   for (const event of events) {
+    if (event.type === "inference.thinking.delta") {
+      state.nativeThinkingSeen = true;
+      output.push(event);
+      continue;
+    }
+
     if (event.type !== "inference.text.delta") {
+      output.push(event);
+      continue;
+    }
+
+    if (state.nativeThinkingSeen) {
       output.push(event);
       continue;
     }

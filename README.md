@@ -63,3 +63,18 @@ A per-model entry wins field-by-field over `default`; an unconfigured
 field falls through to the built-in adapter's own behavior (no override).
 With no `quirks` at all, the built request body is byte-for-byte
 equivalent to the built-in OpenAI adapter's.
+
+## Think-tag stripping is a fallback, not the primary path
+
+Ollama's OpenAI-compat endpoint accepts a `think` field
+(`docs.ollama.com/capabilities/thinking.md`). When a model is asked to
+think that way, the built-in OpenAI adapter's own `reasoning`/
+`reasoning_content` field handling already classifies the response as
+native `inference.thinking.delta` events — there are no `<think>` tags in
+`content` at all in that case, confirmed directly against a local Ollama.
+This package's `<think>…</think>` tag splitter only matters for a model
+that ignores `think` (or wasn't asked) and inlines its reasoning as tags
+in ordinary text. Once a native `inference.thinking.delta` has been seen
+for a response, the splitter stops scanning `content` for tags entirely
+for the rest of that response, so it can never misfire on a coincidental
+literal `<think>` string once real native thinking is already flowing.

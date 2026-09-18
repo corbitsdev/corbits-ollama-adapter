@@ -112,4 +112,26 @@ describe("reclassifyThinkingEvents", () => {
       (textEvent?.data as { partial: { text: string } }).partial.text,
     ).not.toContain("<think>");
   });
+
+  test("once a native thinking.delta has been seen, text deltas pass through without tag-splitting", () => {
+    const state = createThinkSplitState();
+    const nativeThinking: InferenceEvent = {
+      type: "inference.thinking.delta",
+      seq: 1,
+      data: {
+        token: "reasoning from the reasoning field",
+        partial: { text: "" },
+        index: -1,
+      },
+    };
+    const first = reclassifyThinkingEvents([nativeThinking], state);
+    expect(first).toEqual([nativeThinking]);
+
+    // A literal "<think>" appearing in ordinary content after the model
+    // already reported reasoning natively must not be mistaken for a tag
+    // span — the native path already carried the real reasoning.
+    const coincidental = textDelta("here is <think>literally in the reply");
+    const second = reclassifyThinkingEvents([coincidental], state);
+    expect(second).toEqual([coincidental]);
+  });
 });
