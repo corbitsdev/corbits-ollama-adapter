@@ -235,4 +235,69 @@ describe("createOllamaAdapter", () => {
       source,
     });
   });
+
+  test("buildRequest rejects a url-kind image_url", () => {
+    const wrapped = createOllamaAdapter(source, undefined);
+    const withUrlImage: ConversationTurn[] = [
+      {
+        role: "user",
+        timestamp: 0,
+        content: [
+          {
+            type: "image",
+            source: {
+              kind: "url",
+              mimeType: "image/png",
+              url: "https://example.com/cat.png",
+            },
+          },
+        ],
+      },
+    ];
+    expect(() =>
+      wrapped.buildRequest(withUrlImage, "gpt-oss:20b", options),
+    ).toThrow("https://example.com/cat.png");
+  });
+
+  test("buildRequest rejects a file-reference image", () => {
+    const wrapped = createOllamaAdapter(source, undefined);
+    const withFileRefImage: ConversationTurn[] = [
+      {
+        role: "user",
+        timestamp: 0,
+        content: [
+          {
+            type: "image",
+            source: {
+              kind: "file-reference",
+              mimeType: "image/png",
+              reference: "file_abc123",
+            },
+          },
+        ],
+      },
+    ];
+    expect(() =>
+      wrapped.buildRequest(withFileRefImage, "gpt-oss:20b", options),
+    ).toThrow("file_abc123");
+  });
+
+  test("buildRequest accepts a base64 image_url", () => {
+    const wrapped = createOllamaAdapter(source, undefined);
+    const withBase64Image: ConversationTurn[] = [
+      {
+        role: "user",
+        timestamp: 0,
+        content: [
+          {
+            type: "image",
+            source: { kind: "base64", mimeType: "image/png", data: "Zm9v" },
+          },
+        ],
+      },
+    ];
+    expect(() =>
+      wrapped.buildRequest(withBase64Image, "gpt-oss:20b", options),
+    ).not.toThrow();
+  });
 });

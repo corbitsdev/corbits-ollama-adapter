@@ -63,3 +63,13 @@ A per-model entry wins field-by-field over `default`; an unconfigured
 field falls through to the built-in adapter's own behavior (no override).
 With no `quirks` at all, the built request body is byte-for-byte
 equivalent to the built-in OpenAI adapter's.
+
+## Images must be base64
+
+Ollama's OpenAI-compatible endpoint only accepts a base64 `data:`
+`image_url` — it does not fetch a public URL the way OpenAI itself does.
+The built-in adapter's `url`-kind `MediaSource` support passes a public
+URL straight through, which Ollama does not fetch. `buildRequest` rejects
+any non-base64 image source (a public URL or a file reference) with an
+error naming the offending source before the request is sent; a base64
+image part passes through unchanged.

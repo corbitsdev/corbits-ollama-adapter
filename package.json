@@ -1,6 +1,6 @@
 {
   "name": "@corbits/ollama-adapter",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Ollama as an Interchange inference adapter: per-model num_ctx overrides, think-tag stripping, inline tool JSON repair.",
   "license": "LGPL-2.1-only",
   "author": "Sawyer Cutler <sawyer@dirtroad.dev>",

@@ -19,6 +19,7 @@ import type {
   ProviderAdapter,
 } from "@intx/inference";
 import type {
+  ConversationTurn,
   InferenceEvent,
   LastCycleSource,
   TokenUsage,
@@ -44,6 +45,33 @@ type OllamaChatBody = {
   reasoning_effort?: string;
   stream_options?: { include_usage: boolean };
 };
+
+// Ollama's OpenAI-compat endpoint only accepts a base64 `data:` image_url
+// (docs.ollama.com/api/openai-compatibility.md); it does not fetch a public
+// URL the way OpenAI itself does. The built-in adapter's `url`-kind
+// MediaSource support (see providers/openai.js) passes a public URL
+// straight through — against Ollama that lands as a request the server
+// either fails on with an opaque error or, worse, appears to accept while
+// never actually seeing the image. Rejecting the non-base64 source here,
+// with the offending URL named, surfaces the mismatch at the point the
+// mistake was made instead of downstream.
+function rejectNonBase64Images(messages: readonly ConversationTurn[]): void {
+  for (const message of messages) {
+    for (const block of message.content) {
+      if (block.type !== "image") continue;
+      if (block.source.kind === "base64") continue;
+      const described =
+        block.source.kind === "url"
+          ? block.source.url
+          : `file-reference:${block.source.reference}`;
+      throw new Error(
+        `@corbits/ollama-adapter: image_url must be a base64 data URL; ` +
+          `Ollama's OpenAI-compatible endpoint does not fetch a ` +
+          `${block.source.kind} source (received ${described}).`,
+      );
+    }
+  }
+}
 
 function applyOverride(
   built: BuiltRequest,
@@ -173,6 +201,7 @@ export const createOllamaAdapter: AdapterFactory = (
   return {
     ...inner,
     buildRequest: (messages, model, options) => {
+      rejectNonBase64Images(messages);
       setDeclaredToolNames(streamInlineState, options.tools);
       setDeclaredToolNames(jsonInlineState, options.tools);
       return applyOverride(
