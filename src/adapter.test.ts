@@ -35,12 +35,46 @@ const memorySearchTool: ToolDefinition = {
 const CL_7186_PAYLOAD =
   '{"name":"memory_search","parameters":{"query":"this person"}}';
 
-function bodyOf(built: { body: string }): Record<string, unknown> {
-  return JSON.parse(built.body) as Record<string, unknown>;
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function toolStarts(events: readonly InferenceEvent[]): InferenceEvent[] {
-  return events.filter((event) => event.type === "inference.tool_call.start");
+function bodyOf(built: { body: string }): Record<string, unknown> {
+  const parsed: unknown = JSON.parse(built.body);
+  if (!isPlainObject(parsed)) {
+    throw new Error("expected request body to be a JSON object");
+  }
+  return parsed;
+}
+
+function isToolCallStart(
+  event: InferenceEvent,
+): event is Extract<InferenceEvent, { type: "inference.tool_call.start" }> {
+  return event.type === "inference.tool_call.start";
+}
+
+function isToolCallDelta(
+  event: InferenceEvent,
+): event is Extract<InferenceEvent, { type: "inference.tool_call.delta" }> {
+  return event.type === "inference.tool_call.delta";
+}
+
+function isToolCallStartOrDelta(
+  event: InferenceEvent,
+): event is Extract<
+  InferenceEvent,
+  { type: "inference.tool_call.start" | "inference.tool_call.delta" }
+> {
+  return (
+    event.type === "inference.tool_call.start" ||
+    event.type === "inference.tool_call.delta"
+  );
+}
+
+function toolStarts(
+  events: readonly InferenceEvent[],
+): Extract<InferenceEvent, { type: "inference.tool_call.start" }>[] {
+  return events.filter(isToolCallStart);
 }
 
 function textDeltas(events: readonly InferenceEvent[]): InferenceEvent[] {
@@ -49,21 +83,15 @@ function textDeltas(events: readonly InferenceEvent[]): InferenceEvent[] {
 
 function argumentFragments(events: readonly InferenceEvent[]): string {
   return events
-    .filter((event) => event.type === "inference.tool_call.delta")
-    .map(
-      (event) => (event.data as { argumentFragment: string }).argumentFragment,
-    )
+    .filter(isToolCallDelta)
+    .map((event) => event.data.argumentFragment)
     .join("");
 }
 
 function expectSharedToolCallId(events: readonly InferenceEvent[]): void {
   const ids = events
-    .filter(
-      (event) =>
-        event.type === "inference.tool_call.start" ||
-        event.type === "inference.tool_call.delta",
-    )
-    .map((event) => (event.data as { callId: string }).callId);
+    .filter(isToolCallStartOrDelta)
+    .map((event) => event.data.callId);
   expect(ids.length).toBeGreaterThan(0);
   expect(new Set(ids)).toEqual(new Set(["ollama-inline-0"]));
 }
@@ -170,9 +198,7 @@ describe("createOllamaAdapter", () => {
       ),
     ];
     expect(textDeltas(events)).toEqual([]);
-    expect((toolStarts(events)[0]?.data as { name: string }).name).toBe(
-      "memory_search",
-    );
+    expect(toolStarts(events)[0]?.data.name).toBe("memory_search");
     expectSharedToolCallId(events);
     expect(JSON.parse(argumentFragments(events))).toEqual({
       query: "this person",
@@ -196,9 +222,7 @@ describe("createOllamaAdapter", () => {
       }),
     );
     expect(textDeltas(events)).toEqual([]);
-    expect((toolStarts(events)[0]?.data as { name: string }).name).toBe(
-      "memory_search",
-    );
+    expect(toolStarts(events)[0]?.data.name).toBe("memory_search");
     expectSharedToolCallId(events);
     expect(JSON.parse(argumentFragments(events))).toEqual({
       query: "this person",
