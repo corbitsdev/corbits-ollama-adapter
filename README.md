@@ -110,13 +110,17 @@ equivalent to the built-in OpenAI adapter's.
 
 ## Images must be base64
 
-Ollama's OpenAI-compatible endpoint only accepts a base64 `data:`
-`image_url` — it does not fetch a public URL the way OpenAI itself does.
-The built-in adapter's `url`-kind `MediaSource` support passes a public
-URL straight through, which Ollama does not fetch. `createOllamaAdapter`'s
-`buildRequest` rejects any non-base64 image source (a public URL or a
-file reference) with an error naming the offending source before the
-request is sent; a base64 image part passes through unchanged.
+Ollama's OpenAI-compatible and Anthropic-compatible endpoints only
+accept base64 image bytes — they do not fetch a public URL the way
+OpenAI or Anthropic themselves do. The built-in OpenAI adapter's
+`url`-kind `MediaSource` support passes a public URL straight through,
+and the stock Anthropic adapter emits `type: "url"` / `type: "file"`
+sources. Against Ollama those land as a request the server either
+fails on or never actually sees the image. Both
+`createOllamaAdapter` and `createOllamaAnthropicAdapter` reject any
+non-base64 image source (a public URL or a file reference) with an
+error naming the offending source before the request is sent; a
+base64 image part passes through unchanged.
 
 ## Ollama Cloud
 

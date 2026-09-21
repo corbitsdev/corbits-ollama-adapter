@@ -63,15 +63,19 @@ function parseJsonObject(raw: string): Record<string, unknown> {
   return parsed;
 }
 
-// Ollama's OpenAI-compat endpoint only accepts a base64 `data:` image_url
-// (docs.ollama.com/api/openai-compatibility.md); it does not fetch a public
-// URL the way OpenAI itself does. The built-in adapter's `url`-kind
+// Ollama's OpenAI-compat and Anthropic `/v1/messages` surfaces only
+// accept base64 image bytes (docs.ollama.com/api/openai-compatibility.md
+// `data:` image_url; docs.ollama.com/api/anthropic-compatibility.md
+// "Image content (base64)"). They do not fetch a public URL the way
+// OpenAI/Anthropic themselves do. The built-in OpenAI adapter's `url`-kind
 // MediaSource support (see providers/openai.js) passes a public URL
-// straight through — against Ollama that lands as a request the server
-// either fails on with an opaque error or, worse, appears to accept while
-// never actually seeing the image. Rejecting the non-base64 source here,
-// with the offending URL named, surfaces the mismatch at the point the
-// mistake was made instead of downstream.
+// straight through; the stock Anthropic adapter emits `type: "url"` /
+// `type: "file"` sources (see providers/anthropic.js `toAnthropicMediaSource`).
+// Against Ollama that lands as a request the server either fails on with
+// an opaque error or, worse, appears to accept while never actually
+// seeing the image. Rejecting the non-base64 source here, with the
+// offending URL named, surfaces the mismatch at the point the mistake
+// was made instead of downstream. Both factories share this gate.
 function rejectNonBase64Images(messages: readonly ConversationTurn[]): void {
   for (const message of messages) {
     for (const block of message.content) {
@@ -82,9 +86,9 @@ function rejectNonBase64Images(messages: readonly ConversationTurn[]): void {
           ? block.source.url
           : `file-reference:${block.source.reference}`;
       throw new Error(
-        `@corbits/ollama-adapter: image_url must be a base64 data URL; ` +
-          `Ollama's OpenAI-compatible endpoint does not fetch a ` +
-          `${block.source.kind} source (received ${described}).`,
+        `@corbits/ollama-adapter: image source must be base64; ` +
+          `Ollama does not fetch a ${block.source.kind} source ` +
+          `(received ${described}).`,
       );
     }
   }
@@ -261,7 +265,9 @@ export const createOllamaAdapter: AdapterFactory = (
  * {@link createOllamaAdapter}. Wraps Interchange's stock
  * `createAnthropicAdapter` with no OpenAI-compat think-tag stripping,
  * inline-tool-JSON salvage, or `num_ctx` overlay — that surface has no
- * context-window field. `quirks` is still parsed as
+ * context-window field. Non-base64 images are rejected the same way as
+ * on the OpenAI-compat factory; Ollama's Anthropic surface only accepts
+ * base64 image content. `quirks` is still parsed as
  * {@link OllamaAdapterConfig} so a shared sidecar bag does not 400 the
  * stock Anthropic quirks validator; the values are unused on this path.
  *
@@ -282,8 +288,12 @@ export const createOllamaAnthropicAdapter: AdapterFactory = (
   const inner = createAnthropicAdapter(source);
   return {
     ...inner,
-    buildRequest: (messages, model, options) =>
-      withOllamaAnthropicWire(inner.buildRequest(messages, model, options)),
+    buildRequest: (messages, model, options) => {
+      rejectNonBase64Images(messages);
+      return withOllamaAnthropicWire(
+        inner.buildRequest(messages, model, options),
+      );
+    },
   };
 };
 

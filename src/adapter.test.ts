@@ -397,6 +397,71 @@ describe("createOllamaAnthropicAdapter", () => {
     expect(body).not.toHaveProperty("think");
   });
 
+  test("buildRequest rejects a url-kind image_url", () => {
+    const wrapped = createOllamaAnthropicAdapter(source, undefined);
+    const withUrlImage: ConversationTurn[] = [
+      {
+        role: "user",
+        timestamp: 0,
+        content: [
+          {
+            type: "image",
+            source: {
+              kind: "url",
+              mimeType: "image/png",
+              url: "https://example.com/cat.png",
+            },
+          },
+        ],
+      },
+    ];
+    expect(() =>
+      wrapped.buildRequest(withUrlImage, "gpt-oss:20b", options),
+    ).toThrow(/@corbits\/ollama-adapter[\s\S]*https:\/\/example.com\/cat.png/);
+  });
+
+  test("buildRequest rejects a file-reference image", () => {
+    const wrapped = createOllamaAnthropicAdapter(source, undefined);
+    const withFileRefImage: ConversationTurn[] = [
+      {
+        role: "user",
+        timestamp: 0,
+        content: [
+          {
+            type: "image",
+            source: {
+              kind: "file-reference",
+              mimeType: "image/png",
+              reference: "file_abc123",
+            },
+          },
+        ],
+      },
+    ];
+    expect(() =>
+      wrapped.buildRequest(withFileRefImage, "gpt-oss:20b", options),
+    ).toThrow(/@corbits\/ollama-adapter[\s\S]*file_abc123/);
+  });
+
+  test("buildRequest accepts a base64 image", () => {
+    const wrapped = createOllamaAnthropicAdapter(source, undefined);
+    const withBase64Image: ConversationTurn[] = [
+      {
+        role: "user",
+        timestamp: 0,
+        content: [
+          {
+            type: "image",
+            source: { kind: "base64", mimeType: "image/png", data: "Zm9v" },
+          },
+        ],
+      },
+    ];
+    expect(() =>
+      wrapped.buildRequest(withBase64Image, "gpt-oss:20b", options),
+    ).not.toThrow();
+  });
+
   test("preserves the stock Anthropic adapter's response parser", () => {
     const wrapped = createOllamaAnthropicAdapter(source, undefined);
     expect(typeof wrapped.parseResponse).toBe("function");
