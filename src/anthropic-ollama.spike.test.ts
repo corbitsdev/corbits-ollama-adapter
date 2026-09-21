@@ -1,12 +1,11 @@
 // CL-8354 spike: Ollama's Anthropic-compatible `/v1/messages` is a
 // first-class surface alongside OpenAI-compat `/v1/chat/completions`. This
-// test drives `createAnthropicAdapter` from `@intx/inference/providers`
-// directly against a local Ollama — the same inner adapter
-// `createOllamaAnthropicAdapter` wraps. Findings are written up in
-// README.md. The shipped `createOllamaAdapter` remains the OpenAI-compat
-// wrapper.
+// test drives `createOllamaAnthropicAdapter` against a local Ollama —
+// workbench catalog base `http://localhost:11434/v1` concatenated with
+// the factory's `/messages` path. Findings are written up in README.md.
+// The shipped `createOllamaAdapter` remains the OpenAI-compat wrapper.
 import { describe, expect, test } from "bun:test";
-import { createAnthropicAdapter } from "@intx/inference/providers";
+import { BEARER_CREDENTIAL_SENTINEL } from "@intx/inference";
 import type {
   ConversationTurn,
   InferenceEvent,
@@ -14,7 +13,10 @@ import type {
   ToolDefinition,
 } from "@intx/types/runtime";
 
-const OLLAMA_BASE_URL = "http://localhost:11434";
+import { createOllamaAnthropicAdapter } from "./adapter";
+
+const OLLAMA_ROOT_URL = "http://localhost:11434";
+const OLLAMA_V1_BASE_URL = `${OLLAMA_ROOT_URL}/v1`;
 const MODEL = "gpt-oss:20b";
 
 const source: LastCycleSource = {
@@ -58,7 +60,7 @@ function parseTagModelNames(body: unknown): string[] {
 
 async function probeOllamaSpike(): Promise<boolean> {
   try {
-    const tagsRes = await fetch(`${OLLAMA_BASE_URL}/api/tags`, {
+    const tagsRes = await fetch(`${OLLAMA_ROOT_URL}/api/tags`, {
       signal: AbortSignal.timeout(1000),
     });
     if (!tagsRes.ok) return false;
@@ -70,7 +72,7 @@ async function probeOllamaSpike(): Promise<boolean> {
     // that would start generation during skipIf setup.
     let messagesStatus: number | null;
     try {
-      const probe = await fetch(`${OLLAMA_BASE_URL}/v1/messages`, {
+      const probe = await fetch(`${OLLAMA_V1_BASE_URL}/messages`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: "{}",
@@ -100,17 +102,19 @@ function turn(text: string): ConversationTurn {
 async function runStreaming(
   messages: ConversationTurn[],
   opts: Parameters<
-    ReturnType<typeof createAnthropicAdapter>["buildRequest"]
+    ReturnType<typeof createOllamaAnthropicAdapter>["buildRequest"]
   >[2],
 ): Promise<{ status: number; events: InferenceEvent[]; raw: string[] }> {
-  const adapter = createAnthropicAdapter(source);
+  const adapter = createOllamaAnthropicAdapter(source);
   const built = adapter.buildRequest(messages, MODEL, opts);
   const headers = { ...built.headers };
-  // Ollama does not check the Anthropic api-key header at all; the sentinel
-  // is replaced with a harmless placeholder so the raw fetch below doesn't
-  // ship the literal "<inject:credential>" marker string.
-  headers["x-api-key"] = "ollama-does-not-check-this";
-  const res = await fetch(`${OLLAMA_BASE_URL}${built.url}`, {
+  // Ollama Cloud wants Bearer; local Ollama does not check auth. Replace
+  // the sentinel so the raw fetch below doesn't ship the literal
+  // "<inject:bearer-credential>" marker string.
+  if (headers["authorization"] === BEARER_CREDENTIAL_SENTINEL) {
+    headers["authorization"] = "Bearer ollama-does-not-check-this";
+  }
+  const res = await fetch(`${OLLAMA_V1_BASE_URL}${built.url}`, {
     method: "POST",
     headers,
     body: built.body,
@@ -203,81 +207,95 @@ describe("ollama spike skipIf", () => {
   });
 });
 
-describe.skipIf(!reachable)("stock Anthropic adapter against Ollama", () => {
-  test("chat turn: plain text streams back", async () => {
-    const { status, events } = await runStreaming(
-      [turn("Say hi in one word.")],
-      {},
-    );
-    expect(status).toBe(200);
-    const textDeltas = events.filter((e) => e.type === "inference.text.delta");
-    expect(textDeltas.length).toBeGreaterThan(0);
-  }, 60000);
+describe.skipIf(!reachable)(
+  "createOllamaAnthropicAdapter against Ollama",
+  () => {
+    test("chat turn: plain text streams back", async () => {
+      const { status, events } = await runStreaming(
+        [turn("Say hi in one word.")],
+        {},
+      );
+      expect(status).toBe(200);
+      const textDeltas = events.filter(
+        (e) => e.type === "inference.text.delta",
+      );
+      expect(textDeltas.length).toBeGreaterThan(0);
+    }, 60000);
 
-  test("streaming turn: multiple incremental text deltas arrive", async () => {
-    const { status, events } = await runStreaming(
-      [turn("Count from one to five, one number per line.")],
-      {},
-    );
-    expect(status).toBe(200);
-    const textDeltas = events.filter((e) => e.type === "inference.text.delta");
-    // A genuinely streamed response arrives as more than one chunk for a
-    // multi-line answer; a single-shot fake-stream would collapse to one.
-    expect(textDeltas.length).toBeGreaterThan(1);
-  }, 60000);
+    test("streaming turn: multiple incremental text deltas arrive", async () => {
+      const { status, events } = await runStreaming(
+        [turn("Count from one to five, one number per line.")],
+        {},
+      );
+      expect(status).toBe(200);
+      const textDeltas = events.filter(
+        (e) => e.type === "inference.text.delta",
+      );
+      // A genuinely streamed response arrives as more than one chunk for a
+      // multi-line answer; a single-shot fake-stream would collapse to one.
+      expect(textDeltas.length).toBeGreaterThan(1);
+    }, 60000);
 
-  test("tool call turn: model emits a native tool_use block", async () => {
-    const tools: ToolDefinition[] = [
-      {
-        name: "get_weather",
-        description: "Get the current weather for a city",
-        inputSchema: {
-          type: "object",
-          properties: { city: { type: "string" } },
-          required: ["city"],
+    test("tool call turn: model emits a native tool_use block", async () => {
+      const tools: ToolDefinition[] = [
+        {
+          name: "get_weather",
+          description: "Get the current weather for a city",
+          inputSchema: {
+            type: "object",
+            properties: { city: { type: "string" } },
+            required: ["city"],
+          },
         },
-      },
-    ];
-    const { status, events } = await runStreaming(
-      [turn("What is the weather in Boston? Use the get_weather tool.")],
-      { tools },
-    );
-    expect(status).toBe(200);
-    const starts = events.filter(
-      (
-        e,
-      ): e is Extract<InferenceEvent, { type: "inference.tool_call.start" }> =>
-        e.type === "inference.tool_call.start",
-    );
-    expect(starts.length).toBeGreaterThan(0);
-    expect(starts[0]?.data.name).toBe("get_weather");
-    const deltas = events.filter(
-      (
-        e,
-      ): e is Extract<InferenceEvent, { type: "inference.tool_call.delta" }> =>
-        e.type === "inference.tool_call.delta",
-    );
-    const args = deltas.map((e) => e.data.argumentFragment).join("");
-    expect(() => JSON.parse(args)).not.toThrow();
-  }, 60000);
+      ];
+      const { status, events } = await runStreaming(
+        [turn("What is the weather in Boston? Use the get_weather tool.")],
+        { tools },
+      );
+      expect(status).toBe(200);
+      const starts = events.filter(
+        (
+          e,
+        ): e is Extract<
+          InferenceEvent,
+          { type: "inference.tool_call.start" }
+        > => e.type === "inference.tool_call.start",
+      );
+      expect(starts.length).toBeGreaterThan(0);
+      expect(starts[0]?.data.name).toBe("get_weather");
+      const deltas = events.filter(
+        (
+          e,
+        ): e is Extract<
+          InferenceEvent,
+          { type: "inference.tool_call.delta" }
+        > => e.type === "inference.tool_call.delta",
+      );
+      const args = deltas.map((e) => e.data.argumentFragment).join("");
+      expect(() => JSON.parse(args)).not.toThrow();
+    }, 60000);
 
-  test("thinking turn: adapter's thinking request is at least accepted", async () => {
-    const { status, events, raw } = await runStreaming(
-      [turn("What is 17 * 24? Think step by step.")],
-      { thinking: { enabled: true, budgetTokens: 512 } },
-    );
-    // Findings on whether Ollama actually populates thinking_delta (versus
-    // just accepting the field and thinking silently, or 400ing) are
-    // recorded in README.md — this assertion only pins that the request
-    // is not rejected outright.
-    expect(status).toBe(200);
-    expect(raw.length).toBeGreaterThan(0);
-    void events;
-  }, 60000);
-});
+    test("thinking turn: adapter's thinking request is at least accepted", async () => {
+      const { status, events, raw } = await runStreaming(
+        [turn("What is 17 * 24? Think step by step.")],
+        { thinking: { enabled: true, budgetTokens: 512 } },
+      );
+      // Findings on whether Ollama actually populates thinking_delta (versus
+      // just accepting the field and thinking silently, or 400ing) are
+      // recorded in README.md — this assertion only pins that the request
+      // is not rejected outright.
+      expect(status).toBe(200);
+      expect(raw.length).toBeGreaterThan(0);
+      void events;
+    }, 60000);
+  },
+);
 
-describe.skipIf(reachable)("stock Anthropic adapter against Ollama", () => {
-  test("skipped: no local Ollama with gpt-oss:20b and /v1/messages", () => {
-    expect(true).toBe(true);
-  });
-});
+describe.skipIf(reachable)(
+  "createOllamaAnthropicAdapter against Ollama",
+  () => {
+    test("skipped: no local Ollama with gpt-oss:20b and /v1/messages", () => {
+      expect(true).toBe(true);
+    });
+  },
+);

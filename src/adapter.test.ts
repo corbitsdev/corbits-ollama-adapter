@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { BEARER_CREDENTIAL_SENTINEL } from "@intx/inference";
 import { createOpenAIAdapter } from "@intx/inference/providers";
 import type { LastCycleSource } from "@intx/types/runtime";
 import type {
@@ -45,6 +46,12 @@ function bodyOf(built: { body: string }): Record<string, unknown> {
     throw new Error("expected request body to be a JSON object");
   }
   return parsed;
+}
+
+/** Mirrors `@intx/inference` harness `resolveURL`: string concat of base + path. */
+function resolveHarnessURL(path: string, baseURL: string): string {
+  const base = baseURL.endsWith("/") ? baseURL.slice(0, -1) : baseURL;
+  return base + path;
 }
 
 function isToolCallStart(
@@ -349,10 +356,36 @@ describe("createOllamaAdapter", () => {
 });
 
 describe("createOllamaAnthropicAdapter", () => {
-  test("buildRequest targets Anthropic /v1/messages", () => {
+  test("buildRequest targets Anthropic /messages against a /v1 source base", () => {
     const wrapped = createOllamaAnthropicAdapter(source, undefined);
     const built = wrapped.buildRequest(messages, "gpt-oss:20b", options);
-    expect(built.url).toBe("/v1/messages");
+    expect(built.url).toBe("/messages");
+  });
+
+  test("a /v1 source base concatenates to /v1/messages, not /v1/v1/messages", () => {
+    const wrapped = createOllamaAnthropicAdapter(source, undefined);
+    const built = wrapped.buildRequest(messages, "gpt-oss:20b", options);
+    const catalogBase = "http://localhost:11434/v1";
+    const cloudBase = "https://ollama.com/v1";
+    expect(resolveHarnessURL(built.url, catalogBase)).toBe(
+      "http://localhost:11434/v1/messages",
+    );
+    expect(resolveHarnessURL(built.url, cloudBase)).toBe(
+      "https://ollama.com/v1/messages",
+    );
+    expect(resolveHarnessURL(built.url, catalogBase)).not.toContain(
+      "/v1/v1/messages",
+    );
+    expect(resolveHarnessURL(built.url, `${catalogBase}/`)).not.toContain(
+      "/v1/v1/messages",
+    );
+  });
+
+  test("buildRequest uses the Bearer credential sentinel, not x-api-key", () => {
+    const wrapped = createOllamaAnthropicAdapter(source, undefined);
+    const built = wrapped.buildRequest(messages, "gpt-oss:20b", options);
+    expect(built.headers["authorization"]).toBe(BEARER_CREDENTIAL_SENTINEL);
+    expect(built.headers).not.toHaveProperty("x-api-key");
   });
 
   test("does not overlay OpenAI-compat num_ctx onto the Anthropic body", () => {

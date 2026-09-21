@@ -10,8 +10,9 @@
 // that already knows these tokens came from Ollama. Once a native
 // thinking field has been seen for a response, tag-splitting stops so a
 // coincidental literal "<think>" in ordinary text cannot be mistaken for
-// a span — except an already-open tag span is still closed so leftover
-// `</think>` cannot leak as text.
+// a span. An already-open tag span is abandoned (later text is answer
+// text, not thinking) and leftover `</think>` is stripped so it cannot
+// leak as text.
 import type { InferenceEvent } from "@intx/types/runtime";
 
 /** Carries the split state across every chunk of one streamed response —
@@ -36,8 +37,10 @@ export type ThinkSplitState = {
    * already-classified native thinking stream is unnecessary and risks
    * misfiring on a coincidental literal "<think>" in ordinary text. The
    * tag splitter still runs as-is for a model that ignores `think` and
-   * falls back to inline tags. An already-open tag span is still closed
-   * after native thinking is seen so leftover `</think>` cannot leak. */
+   * falls back to inline tags. If a tag span was already open when native
+   * thinking arrives, it is abandoned so later answer text is not
+   * swallowed as thinking while waiting for `</think>`; leftover close
+   * tags are still stripped so they cannot leak. */
   nativeThinkingSeen: boolean;
 };
 
@@ -123,6 +126,7 @@ export function reclassifyThinkingEvents(
   for (const event of events) {
     if (event.type === "inference.thinking.delta") {
       state.nativeThinkingSeen = true;
+      state.inThink = false;
       output.push(event);
       continue;
     }
@@ -132,8 +136,25 @@ export function reclassifyThinkingEvents(
       continue;
     }
 
-    if (state.nativeThinkingSeen && !state.inThink) {
-      output.push(event);
+    if (state.nativeThinkingSeen) {
+      const token = event.data.token;
+      if (!token.includes(THINK_CLOSE)) {
+        output.push(event);
+        continue;
+      }
+      const stripped = token.split(THINK_CLOSE).join("");
+      if (stripped === "") continue;
+      output.push({
+        type: "inference.text.delta",
+        seq: event.seq,
+        data: {
+          token: stripped,
+          partial: event.data.partial,
+          ...(event.data.index !== undefined
+            ? { index: event.data.index }
+            : {}),
+        },
+      });
       continue;
     }
 

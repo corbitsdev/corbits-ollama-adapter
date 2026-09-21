@@ -15,7 +15,11 @@ exports a factory for each:
   `https://ollama.com/v1/messages`) —
   [Anthropic compatibility](https://docs.ollama.com/api/anthropic-compatibility).
   `createOllamaAnthropicAdapter` wraps Interchange's stock
-  `createAnthropicAdapter` against this surface.
+  `createAnthropicAdapter` against this surface. Workbench catalog and
+  Cloud sources already use a `/v1` base, so the factory emits
+  `/messages` (the harness concatenates `baseURL + path`) and
+  `Authorization: Bearer` rather than stock Anthropic `/v1/messages`
+  plus `x-api-key`.
 
 Neither surface replaces the other. OpenAI-compat is where per-request
 `num_ctx` and this adapter's think-tag / inline-tool-JSON repairs live.
@@ -121,11 +125,13 @@ OpenAI-compatible (or Anthropic-compatible) surface, just a different
 base URL and auth scheme. An `InferenceSource` pointed at Ollama Cloud
 instead of a local install needs:
 
-- **Base URL**: `https://ollama.com/v1` (OpenAI-compat). This adapter
-  concatenates `/chat/completions`; native `https://ollama.com/api/` is a
-  different surface and would miss `/v1/chat/completions`. Anthropic
-  `/v1/messages` is the same host with that path.
-- **Auth**: `Authorization: Bearer <key>`, with the key generated at
+- **Base URL**: `https://ollama.com/v1` (same as local catalog
+  `http://localhost:11434/v1`). `createOllamaAdapter` concatenates
+  `/chat/completions`; `createOllamaAnthropicAdapter` concatenates
+  `/messages`. Native `https://ollama.com/api/` is a different surface
+  and would miss those `/v1` paths.
+- **Auth**: `Authorization: Bearer <key>` on both factories (the bearer
+  credential sentinel), with the key generated at
   [ollama.com/settings/keys](https://ollama.com/settings/keys)
 - **Models**: the cloud-hosted catalog is listed at
   [ollama.com/search?c=cloud](https://ollama.com/search?c=cloud) — it is
@@ -137,14 +143,13 @@ built-in cost/limit assumptions for it; an operator wiring one up sets
 the base URL, bearer key, and model name explicitly with no
 Ollama-Cloud-specific config from this adapter.
 
-## Spike: the stock Anthropic adapter against Ollama's `/v1/messages`
+## Spike: `createOllamaAnthropicAdapter` against Ollama's `/v1/messages`
 
 Ollama serves an Anthropic-compatible endpoint
 (`docs.ollama.com/api/anthropic-compatibility.md`) at local
 `:11434/v1/messages` and cloud `https://ollama.com/v1/messages`.
-`src/anthropic-ollama.spike.test.ts` drives `@intx/inference`'s stock,
-unmodified `createAnthropicAdapter` straight at a local Ollama — the
-same inner adapter `createOllamaAnthropicAdapter` wraps — covering a
+`src/anthropic-ollama.spike.test.ts` drives `createOllamaAnthropicAdapter`
+at a local Ollama using the workbench `/v1` source base, covering a
 plain chat turn, a streaming turn, a tool-call turn, and a thinking
 turn. It skips cleanly when Ollama is unreachable, the model is missing,
 or `/v1/messages` is 404.

@@ -20,14 +20,15 @@
 // same `reasoning_effort` field Ollama already recognizes for gpt-oss
 // models on this endpoint.
 import {
+  BEARER_CREDENTIAL_SENTINEL,
+  type AdapterFactory,
+  type BuiltRequest,
+  type ProviderAdapter,
+} from "@intx/inference";
+import {
   createAnthropicAdapter,
   createOpenAIAdapter,
 } from "@intx/inference/providers";
-import type {
-  AdapterFactory,
-  BuiltRequest,
-  ProviderAdapter,
-} from "@intx/inference";
 import type {
   ConversationTurn,
   InferenceEvent,
@@ -263,11 +264,37 @@ export const createOllamaAdapter: AdapterFactory = (
  * context-window field. `quirks` is still parsed as
  * {@link OllamaAdapterConfig} so a shared sidecar bag does not 400 the
  * stock Anthropic quirks validator; the values are unused on this path.
+ *
+ * Workbench catalog and Cloud sources already use a `/v1` base
+ * (`http://localhost:11434/v1`, `https://ollama.com/v1`). The harness
+ * concatenates `baseURL + built.url`, so this factory emits `/messages`
+ * (matching OpenAI-compat `/chat/completions`) rather than stock
+ * Anthropic `/v1/messages`, which would wire as `/v1/v1/messages`.
+ * Ollama Cloud expects `Authorization: Bearer`, so the stock
+ * `x-api-key` header is replaced with the same bearer credential
+ * sentinel {@link createOllamaAdapter} inherits from OpenAI-compat.
  */
 export const createOllamaAnthropicAdapter: AdapterFactory = (
   source: LastCycleSource,
   quirks?: unknown,
 ): ProviderAdapter => {
   parseOllamaAdapterConfig(quirks);
-  return createAnthropicAdapter(source);
+  const inner = createAnthropicAdapter(source);
+  return {
+    ...inner,
+    buildRequest: (messages, model, options) =>
+      withOllamaAnthropicWire(inner.buildRequest(messages, model, options)),
+  };
 };
+
+function withOllamaAnthropicWire(built: BuiltRequest): BuiltRequest {
+  const { ["x-api-key"]: _dropped, ...headers } = built.headers;
+  return {
+    ...built,
+    url: "/messages",
+    headers: {
+      ...headers,
+      authorization: BEARER_CREDENTIAL_SENTINEL,
+    },
+  };
+}
