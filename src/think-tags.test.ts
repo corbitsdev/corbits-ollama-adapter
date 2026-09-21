@@ -45,6 +45,13 @@ function requireTextDelta(
   return event;
 }
 
+function tokenOf(event: InferenceEvent): string {
+  if (isTextDelta(event) || isThinkingDelta(event)) {
+    return event.data.token;
+  }
+  return "";
+}
+
 describe("reclassifyThinkingEvents", () => {
   test("a whole <think>...</think> span in one token becomes thinking-delta, not text-delta", () => {
     const state = createThinkSplitState();
@@ -174,14 +181,9 @@ describe("reclassifyThinkingEvents", () => {
       [textDelta(" leftover</think>visible")],
       state,
     );
-    const tokens = after.map(
-      (event) => (event.data as { token: string }).token,
-    );
+    const tokens = after.map(tokenOf);
     expect(tokens.join("")).not.toContain("<think>");
     expect(tokens.join("")).not.toContain("</think>");
-    const textEvent = after.find(
-      (event) => event.type === "inference.text.delta",
-    );
-    expect((textEvent?.data as { token: string }).token).toBe("visible");
+    expect(after.find(isTextDelta)?.data.token).toBe("visible");
   });
 });
