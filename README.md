@@ -15,7 +15,7 @@ bun add @corbits/ollama-adapter
 
 Peers: `@intx/inference` and `@intx/types` (>= 0.3.0).
 
-## Use
+## Quickstart
 
 Register either factory on the `ollama` provider key via `SIDECAR_ADAPTER_MANIFEST`. The package must already be installed in the sidecar workspace — the manifest names a module, it never carries code.
 
@@ -33,7 +33,7 @@ SIDECAR_ADAPTER_MANIFEST=[{"provider":"ollama","specifier":"@corbits/ollama-adap
 
 Point the source `baseURL` at local `http://localhost:11434/v1` or Cloud `https://ollama.com/v1`. The harness concatenates `baseURL + path`, so the factories emit `/chat/completions` and `/messages` (not `/v1/messages`). Both send `Authorization: Bearer`. Native `https://ollama.com/api/` is a different surface and would miss those `/v1` paths.
 
-## Full example
+### Full example
 
 ```ts
 import type { AdapterManifest } from "@intx/inference";
