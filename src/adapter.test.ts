@@ -279,7 +279,7 @@ describe("createOllamaAdapter", () => {
     ];
     expect(() =>
       wrapped.buildRequest(withFileRefImage, "gpt-oss:20b", options),
-    ).toThrow("file_abc123");
+    ).toThrow(/@corbits\/ollama-adapter[\s\S]*file_abc123/);
   });
 
   test("buildRequest accepts a base64 image_url", () => {
