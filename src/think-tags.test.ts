@@ -134,4 +134,39 @@ describe("reclassifyThinkingEvents", () => {
     const second = reclassifyThinkingEvents([coincidental], state);
     expect(second).toEqual([coincidental]);
   });
+
+  test("an open think span does not leak leftover tags once a native thinking.delta arrives", () => {
+    const state = createThinkSplitState();
+    const opened = reclassifyThinkingEvents(
+      [textDelta("<think>partial")],
+      state,
+    );
+    expect(opened).toHaveLength(1);
+    expect(opened[0]?.type).toBe("inference.thinking.delta");
+
+    const nativeThinking: InferenceEvent = {
+      type: "inference.thinking.delta",
+      seq: 2,
+      data: {
+        token: "reasoning from the reasoning field",
+        partial: { text: "" },
+        index: -1,
+      },
+    };
+    reclassifyThinkingEvents([nativeThinking], state);
+
+    const after = reclassifyThinkingEvents(
+      [textDelta(" leftover</think>visible")],
+      state,
+    );
+    const tokens = after.map(
+      (event) => (event.data as { token: string }).token,
+    );
+    expect(tokens.join("")).not.toContain("<think>");
+    expect(tokens.join("")).not.toContain("</think>");
+    const textEvent = after.find(
+      (event) => event.type === "inference.text.delta",
+    );
+    expect((textEvent?.data as { token: string }).token).toBe("visible");
+  });
 });

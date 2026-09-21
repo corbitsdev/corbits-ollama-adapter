@@ -1,13 +1,17 @@
-// Ollama's OpenAI-compatible endpoint never populates the `reasoning`/
-// `reasoning_content` delta fields `@intx/inference`'s OpenAI provider
-// looks for (see `providers/openai.js`'s `reasoningFieldNames` handling).
-// gpt-oss and qwen instead emit their chain-of-thought inline inside the
-// ordinary `content` field, wrapped in `<think>…</think>`. Left alone, that
-// text is indistinguishable from the reply and rides every hop downstream
-// as a genuine `inference.text.delta` leak. This
-// module reclassifies it into `inference.thinking.delta` before anything
-// else ever sees it, at the one place that already knows these tokens came
-// from Ollama.
+// Some Ollama models populate the `reasoning`/`reasoning_content` delta
+// fields `@intx/inference`'s OpenAI provider already classifies as
+// `inference.thinking.delta` (see `providers/openai.js`'s
+// `reasoningFieldNames` handling) — typically when `think` is set on the
+// request. Other models still emit chain-of-thought inline in `content`,
+// wrapped in `<think>…</think>`. Left alone, that tagged text is
+// indistinguishable from the reply and rides every hop downstream as a
+// genuine `inference.text.delta` leak. This module reclassifies inline
+// tags into `inference.thinking.delta` as a fallback, at the one place
+// that already knows these tokens came from Ollama. Once a native
+// thinking field has been seen for a response, tag-splitting stops so a
+// coincidental literal "<think>" in ordinary text cannot be mistaken for
+// a span — except an already-open tag span is still closed so leftover
+// `</think>` cannot leak as text.
 import type { InferenceEvent } from "@intx/types/runtime";
 
 /** Carries the split state across every chunk of one streamed response —
@@ -127,7 +131,7 @@ export function reclassifyThinkingEvents(
       continue;
     }
 
-    if (state.nativeThinkingSeen) {
+    if (state.nativeThinkingSeen && !state.inThink) {
       output.push(event);
       continue;
     }
