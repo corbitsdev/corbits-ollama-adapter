@@ -37,13 +37,19 @@ import {
   setDeclaredToolNames,
 } from "./inline-tool-json";
 
-type OllamaChatBody = {
-  options?: Record<string, unknown>;
-  max_tokens?: number;
-  max_completion_tokens?: number;
-  reasoning_effort?: string;
-  stream_options?: { include_usage: boolean };
-};
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parseJsonObject(raw: string): Record<string, unknown> {
+  const parsed: unknown = JSON.parse(raw);
+  if (!isPlainObject(parsed)) {
+    throw new Error(
+      "@corbits/ollama-adapter: built request body is not a JSON object",
+    );
+  }
+  return parsed;
+}
 
 // Parameters Ollama's OpenAI-compatible endpoint accepts on the wire but
 // silently ignores rather than rejecting
@@ -77,32 +83,29 @@ function applyOverride(
   built: BuiltRequest,
   override: OllamaAdapterOverride,
 ): BuiltRequest {
-  const body = JSON.parse(built.body) as OllamaChatBody;
+  const body = parseJsonObject(built.body);
   // Without include_usage, Ollama's OpenAI-compat stream often ends with no
   // usage object; the harness then synthesizes zero token counts that Insights
   // used to display as Cost $0.00 / 0/0.
-  body.stream_options = { include_usage: true };
+  body["stream_options"] = { include_usage: true };
   if (override.numCtx !== undefined) {
-    body.options = { ...body.options, num_ctx: override.numCtx };
+    const options = isPlainObject(body["options"]) ? body["options"] : {};
+    body["options"] = { ...options, num_ctx: override.numCtx };
   }
   if (override.maxOutputTokens !== undefined) {
     // The built-in adapter already set whichever of these two fields its
     // quirks resolved to; overwrite that same field rather than assuming
     // one, so the override wins regardless of which one is in play.
-    if (body.max_completion_tokens !== undefined) {
-      body.max_completion_tokens = override.maxOutputTokens;
+    if (body["max_completion_tokens"] !== undefined) {
+      body["max_completion_tokens"] = override.maxOutputTokens;
     } else {
-      body.max_tokens = override.maxOutputTokens;
+      body["max_tokens"] = override.maxOutputTokens;
     }
   }
   if (override.reasoningEffort !== undefined) {
-    body.reasoning_effort = override.reasoningEffort;
+    body["reasoning_effort"] = override.reasoningEffort;
   }
   return { ...built, body: JSON.stringify(body) };
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function asNonNegativeInt(value: unknown): number | null {
