@@ -21,18 +21,75 @@ const source: LastCycleSource = {
   model: MODEL,
 };
 
-async function ollamaReachable(): Promise<boolean> {
+type SpikeProbe = {
+  tagsOk: boolean;
+  modelNames: readonly string[];
+  messagesStatus: number | null;
+};
+
+// skipIf must treat more than a down daemon as skip: a running Ollama
+// without gpt-oss:20b, or without the Anthropic `/v1/messages` surface,
+// still 404s the live turns.
+function ollamaSpikeShouldRun(probe: SpikeProbe, model: string): boolean {
+  if (!probe.tagsOk) return false;
+  if (!probe.modelNames.includes(model)) return false;
+  if (probe.messagesStatus === null || probe.messagesStatus === 404) {
+    return false;
+  }
+  return true;
+}
+
+function parseTagModelNames(body: unknown): string[] {
+  if (typeof body !== "object" || body === null) return [];
+  if (!("models" in body)) return [];
+  const models = body.models;
+  if (!Array.isArray(models)) return [];
+  const names: string[] = [];
+  for (const entry of models) {
+    if (typeof entry !== "object" || entry === null) continue;
+    if ("name" in entry && typeof entry.name === "string") {
+      names.push(entry.name);
+    }
+  }
+  return names;
+}
+
+async function probeOllamaSpike(): Promise<boolean> {
   try {
-    const res = await fetch(`${OLLAMA_BASE_URL}/api/tags`, {
+    const tagsRes = await fetch(`${OLLAMA_BASE_URL}/api/tags`, {
       signal: AbortSignal.timeout(1000),
     });
-    return res.ok;
+    if (!tagsRes.ok) return false;
+    const modelNames = parseTagModelNames(await tagsRes.json());
+    if (!modelNames.includes(MODEL)) return false;
+
+    // Empty body: existing `/v1/messages` typically 400s; a missing
+    // Anthropic surface 404s. Do not send a real completion request —
+    // that would start generation during skipIf setup.
+    let messagesStatus: number | null;
+    try {
+      const probe = await fetch(`${OLLAMA_BASE_URL}/v1/messages`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+        signal: AbortSignal.timeout(1000),
+      });
+      messagesStatus = probe.status;
+      await probe.body?.cancel();
+    } catch {
+      messagesStatus = null;
+    }
+
+    return ollamaSpikeShouldRun(
+      { tagsOk: true, modelNames, messagesStatus },
+      MODEL,
+    );
   } catch {
     return false;
   }
 }
 
-const reachable = await ollamaReachable();
+const reachable = await probeOllamaSpike();
 
 function turn(text: string): ConversationTurn {
   return { role: "user", timestamp: 0, content: [{ type: "text", text }] };
@@ -82,6 +139,67 @@ async function runStreaming(
   }
   return { status: res.status, events, raw };
 }
+
+describe("ollama spike skipIf", () => {
+  test("skips when GET /api/tags is not ok", () => {
+    expect(
+      ollamaSpikeShouldRun(
+        { tagsOk: false, modelNames: [MODEL], messagesStatus: 400 },
+        MODEL,
+      ),
+    ).toBe(false);
+  });
+
+  test("skips when gpt-oss:20b is missing from tags", () => {
+    expect(
+      ollamaSpikeShouldRun(
+        {
+          tagsOk: true,
+          modelNames: ["llama3.2:latest"],
+          messagesStatus: 400,
+        },
+        MODEL,
+      ),
+    ).toBe(false);
+  });
+
+  test("skips when POST /v1/messages is 404", () => {
+    expect(
+      ollamaSpikeShouldRun(
+        { tagsOk: true, modelNames: [MODEL], messagesStatus: 404 },
+        MODEL,
+      ),
+    ).toBe(false);
+  });
+
+  test("skips when POST /v1/messages is unreachable", () => {
+    expect(
+      ollamaSpikeShouldRun(
+        { tagsOk: true, modelNames: [MODEL], messagesStatus: null },
+        MODEL,
+      ),
+    ).toBe(false);
+  });
+
+  test("runs when tags list the model and /v1/messages is not 404", () => {
+    expect(
+      ollamaSpikeShouldRun(
+        { tagsOk: true, modelNames: [MODEL], messagesStatus: 400 },
+        MODEL,
+      ),
+    ).toBe(true);
+  });
+
+  test("parseTagModelNames reads the tags name list", () => {
+    expect(
+      parseTagModelNames({
+        models: [{ name: "gpt-oss:20b" }, { name: "llama3.2:latest" }],
+      }),
+    ).toEqual(["gpt-oss:20b", "llama3.2:latest"]);
+    expect(parseTagModelNames({ models: [] })).toEqual([]);
+    expect(parseTagModelNames(null)).toEqual([]);
+  });
+});
 
 describe.skipIf(!reachable)("stock Anthropic adapter against Ollama", () => {
   test("chat turn: plain text streams back", async () => {
@@ -157,7 +275,7 @@ describe.skipIf(!reachable)("stock Anthropic adapter against Ollama", () => {
 });
 
 describe.skipIf(reachable)("stock Anthropic adapter against Ollama", () => {
-  test("skipped: no local Ollama reachable at localhost:11434", () => {
+  test("skipped: no local Ollama with gpt-oss:20b and /v1/messages", () => {
     expect(true).toBe(true);
   });
 });

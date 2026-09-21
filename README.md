@@ -73,7 +73,8 @@ Ollama serves an Anthropic-compatible endpoint
 unmodified `createAnthropicAdapter` straight at a local Ollama — no code
 from this package is in the request/response path — covering a plain chat
 turn, a streaming turn, a tool-call turn, and a thinking turn. It skips
-cleanly when Ollama is unreachable.
+cleanly when Ollama is unreachable, the model is missing, or
+`/v1/messages` is 404.
 
 ### Findings
 
