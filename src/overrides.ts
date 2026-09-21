@@ -8,7 +8,7 @@ import { type } from "arktype";
 export const ReasoningEffort = type("'low' | 'medium' | 'high'");
 export type ReasoningEffort = typeof ReasoningEffort.infer;
 
-export const Think = type("boolean | 'low' | 'medium' | 'high'");
+export const Think = type("boolean | 'low' | 'medium' | 'high' | 'max'");
 export type Think = typeof Think.infer;
 
 export const OllamaAdapterOverride = type({

@@ -33,6 +33,9 @@ describe("parseOllamaAdapterConfig", () => {
     expect(() =>
       parseOllamaAdapterConfig({ default: { think: "high" } }),
     ).not.toThrow();
+    expect(() =>
+      parseOllamaAdapterConfig({ default: { think: "max" } }),
+    ).not.toThrow();
   });
 
   test("rejects a think value outside boolean or the closed effort set", () => {

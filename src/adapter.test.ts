@@ -107,6 +107,14 @@ describe("createOllamaAdapter", () => {
     expect(bodyOf(built)["think"]).toBe("high");
   });
 
+  test("a configured think: max override appears in the built request body", () => {
+    const wrapped = createOllamaAdapter(source, {
+      default: { think: "max" },
+    });
+    const built = wrapped.buildRequest(messages, "qwen3", options);
+    expect(bodyOf(built)["think"]).toBe("max");
+  });
+
   test("an unconfigured think override is omitted from the built request body", () => {
     const wrapped = createOllamaAdapter(source, {});
     const built = wrapped.buildRequest(messages, "gpt-oss:20b", options);
