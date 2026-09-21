@@ -46,8 +46,34 @@ function reclassify(
   );
 }
 
-function toolStarts(events: readonly InferenceEvent[]): InferenceEvent[] {
-  return events.filter((event) => event.type === "inference.tool_call.start");
+function isToolCallStart(
+  event: InferenceEvent,
+): event is Extract<InferenceEvent, { type: "inference.tool_call.start" }> {
+  return event.type === "inference.tool_call.start";
+}
+
+function isToolCallDelta(
+  event: InferenceEvent,
+): event is Extract<InferenceEvent, { type: "inference.tool_call.delta" }> {
+  return event.type === "inference.tool_call.delta";
+}
+
+function isToolCallStartOrDelta(
+  event: InferenceEvent,
+): event is Extract<
+  InferenceEvent,
+  { type: "inference.tool_call.start" | "inference.tool_call.delta" }
+> {
+  return (
+    event.type === "inference.tool_call.start" ||
+    event.type === "inference.tool_call.delta"
+  );
+}
+
+function toolStarts(
+  events: readonly InferenceEvent[],
+): Extract<InferenceEvent, { type: "inference.tool_call.start" }>[] {
+  return events.filter(isToolCallStart);
 }
 
 function textDeltas(events: readonly InferenceEvent[]): InferenceEvent[] {
@@ -56,12 +82,8 @@ function textDeltas(events: readonly InferenceEvent[]): InferenceEvent[] {
 
 function toolCallIds(events: readonly InferenceEvent[]): string[] {
   return events
-    .filter(
-      (event) =>
-        event.type === "inference.tool_call.start" ||
-        event.type === "inference.tool_call.delta",
-    )
-    .map((event) => (event.data as { callId: string }).callId);
+    .filter(isToolCallStartOrDelta)
+    .map((event) => event.data.callId);
 }
 
 function expectSharedToolCallId(events: readonly InferenceEvent[]): void {
@@ -72,10 +94,8 @@ function expectSharedToolCallId(events: readonly InferenceEvent[]): void {
 
 function argumentFragments(events: readonly InferenceEvent[]): string {
   return events
-    .filter((event) => event.type === "inference.tool_call.delta")
-    .map(
-      (event) => (event.data as { argumentFragment: string }).argumentFragment,
-    )
+    .filter(isToolCallDelta)
+    .map((event) => event.data.argumentFragment)
     .join("");
 }
 
@@ -88,7 +108,7 @@ describe("reclassifyInlineToolJsonEvents", () => {
     expect(textDeltas(out)).toEqual([]);
     const starts = toolStarts(out);
     expect(starts).toHaveLength(1);
-    expect((starts[0]?.data as { name: string }).name).toBe("memory_search");
+    expect(starts[0]?.data.name).toBe("memory_search");
     expectSharedToolCallId(out);
     expect(JSON.parse(argumentFragments(out))).toEqual({
       query: "this person",
@@ -114,9 +134,7 @@ describe("reclassifyInlineToolJsonEvents", () => {
 
     const flushed = reclassifyInlineToolJsonEvents([], state, { flush: true });
     expect(textDeltas(flushed)).toEqual([]);
-    expect((toolStarts(flushed)[0]?.data as { name: string }).name).toBe(
-      "memory_search",
-    );
+    expect(toolStarts(flushed)[0]?.data.name).toBe("memory_search");
     expectSharedToolCallId(flushed);
     expect(JSON.parse(argumentFragments(flushed))).toEqual({
       query: "this person",
@@ -186,7 +204,7 @@ describe("reclassifyInlineToolJsonEvents", () => {
       flush: true,
     });
     const start = toolStarts(out)[0];
-    expect((start?.data as { index?: number }).index).toBe(0);
+    expect(start?.data.index).toBe(0);
     expectSharedToolCallId(out);
     expect(textDeltas(out)).toEqual([]);
   });
