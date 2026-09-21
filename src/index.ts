@@ -1,8 +1,9 @@
-export { createOllamaAdapter } from "./adapter";
+export { createOllamaAdapter, createOllamaAnthropicAdapter } from "./adapter";
 export {
   OllamaAdapterConfig,
   OllamaAdapterOverride,
   ReasoningEffort,
+  Think,
   parseOllamaAdapterConfig,
   resolveOverride,
 } from "./overrides";

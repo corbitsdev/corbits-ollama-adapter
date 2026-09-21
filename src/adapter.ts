@@ -1,7 +1,14 @@
-// The `ollama` provider adapter: the built-in OpenAI Chat Completions
-// adapter (SSE parsing, retry/pacing header extraction, message
-// marshaling — all unmodified), wrapped so `buildRequest` applies
-// operator-configured overrides onto the request body before it ships.
+// The `ollama` provider adapter wraps Interchange's built-in OpenAI Chat
+// Completions adapter against Ollama's OpenAI-compat `/v1/chat/completions`
+// (SSE parsing, retry/pacing header extraction, message marshaling — all
+// unmodified). `buildRequest` then applies operator-configured overrides
+// onto the request body before it ships.
+//
+// Ollama also serves Anthropic `/v1/messages` as a first-class surface
+// (docs.ollama.com/api/anthropic-compatibility.md). `createOllamaAnthropicAdapter`
+// wraps stock `createAnthropicAdapter` against that path; this OpenAI-compat
+// wrapper stays because that is where `options.num_ctx` and the
+// OpenAI-compat think-tag / inline-tool-JSON repairs live.
 //
 // Ollama's openai-compatible `/v1/chat/completions` endpoint takes
 // `max_tokens` (mapped internally to Ollama's native `num_predict`) but has
@@ -12,13 +19,17 @@
 // mode this adapter exists to rule out. Reasoning effort rides through the
 // same `reasoning_effort` field Ollama already recognizes for gpt-oss
 // models on this endpoint.
-import { createOpenAIAdapter } from "@intx/inference/providers";
+import {
+  createAnthropicAdapter,
+  createOpenAIAdapter,
+} from "@intx/inference/providers";
 import type {
   AdapterFactory,
   BuiltRequest,
   ProviderAdapter,
 } from "@intx/inference";
 import type {
+  ConversationTurn,
   InferenceEvent,
   LastCycleSource,
   TokenUsage,
@@ -51,6 +62,33 @@ function parseJsonObject(raw: string): Record<string, unknown> {
   return parsed;
 }
 
+// Ollama's OpenAI-compat endpoint only accepts a base64 `data:` image_url
+// (docs.ollama.com/api/openai-compatibility.md); it does not fetch a public
+// URL the way OpenAI itself does. The built-in adapter's `url`-kind
+// MediaSource support (see providers/openai.js) passes a public URL
+// straight through — against Ollama that lands as a request the server
+// either fails on with an opaque error or, worse, appears to accept while
+// never actually seeing the image. Rejecting the non-base64 source here,
+// with the offending URL named, surfaces the mismatch at the point the
+// mistake was made instead of downstream.
+function rejectNonBase64Images(messages: readonly ConversationTurn[]): void {
+  for (const message of messages) {
+    for (const block of message.content) {
+      if (block.type !== "image") continue;
+      if (block.source.kind === "base64") continue;
+      const described =
+        block.source.kind === "url"
+          ? block.source.url
+          : `file-reference:${block.source.reference}`;
+      throw new Error(
+        `@corbits/ollama-adapter: image_url must be a base64 data URL; ` +
+          `Ollama's OpenAI-compatible endpoint does not fetch a ` +
+          `${block.source.kind} source (received ${described}).`,
+      );
+    }
+  }
+}
+
 function applyOverride(
   built: BuiltRequest,
   override: OllamaAdapterOverride,
@@ -76,6 +114,9 @@ function applyOverride(
   }
   if (override.reasoningEffort !== undefined) {
     body["reasoning_effort"] = override.reasoningEffort;
+  }
+  if (override.think !== undefined) {
+    body["think"] = override.think;
   }
   return { ...built, body: JSON.stringify(body) };
 }
@@ -152,10 +193,10 @@ function withOllamaUsage(
 }
 
 /**
- * `AdapterFactory` for the `ollama` provider key, the named export a
- * `SIDECAR_ADAPTER_MANIFEST` entry points at. `quirks` is this package's
- * own {@link OllamaAdapterConfig} (an `InferenceSource.quirks` bag), not
- * the built-in adapter's `OpenAIQuirks` — the wrapped adapter is
+ * OpenAI-compat `AdapterFactory` for Ollama `/v1/chat/completions`. A
+ * `SIDECAR_ADAPTER_MANIFEST` entry may name this export. `quirks` is this
+ * package's own {@link OllamaAdapterConfig} (an `InferenceSource.quirks`
+ * bag), not the built-in adapter's `OpenAIQuirks` — the wrapped adapter is
  * constructed with no quirks of its own, so its request/response handling
  * is exactly the shipped default except for this override pass.
  */
@@ -176,6 +217,7 @@ export const createOllamaAdapter: AdapterFactory = (
   return {
     ...inner,
     buildRequest: (messages, model, options) => {
+      rejectNonBase64Images(messages);
       setDeclaredToolNames(streamInlineState, options.tools);
       setDeclaredToolNames(jsonInlineState, options.tools);
       return applyOverride(
@@ -210,4 +252,22 @@ export const createOllamaAdapter: AdapterFactory = (
         source,
       ),
   };
+};
+
+/**
+ * Anthropic `AdapterFactory` for Ollama `/v1/messages`. A
+ * `SIDECAR_ADAPTER_MANIFEST` entry may name this export instead of
+ * {@link createOllamaAdapter}. Wraps Interchange's stock
+ * `createAnthropicAdapter` with no OpenAI-compat think-tag stripping,
+ * inline-tool-JSON salvage, or `num_ctx` overlay — that surface has no
+ * context-window field. `quirks` is still parsed as
+ * {@link OllamaAdapterConfig} so a shared sidecar bag does not 400 the
+ * stock Anthropic quirks validator; the values are unused on this path.
+ */
+export const createOllamaAnthropicAdapter: AdapterFactory = (
+  source: LastCycleSource,
+  quirks?: unknown,
+): ProviderAdapter => {
+  parseOllamaAdapterConfig(quirks);
+  return createAnthropicAdapter(source);
 };

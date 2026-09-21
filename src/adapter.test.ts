@@ -8,7 +8,7 @@ import type {
   ToolDefinition,
 } from "@intx/types/runtime";
 
-import { createOllamaAdapter } from "./adapter";
+import { createOllamaAdapter, createOllamaAnthropicAdapter } from "./adapter";
 
 const source: LastCycleSource = {
   sourceId: "ollama-test",
@@ -125,6 +125,28 @@ describe("createOllamaAdapter", () => {
     });
     const built = wrapped.buildRequest(messages, "gpt-oss:20b", options);
     expect(bodyOf(built)["reasoning_effort"]).toBe("high");
+  });
+
+  test("a configured think override appears in the built request body", () => {
+    const wrapped = createOllamaAdapter(source, {
+      default: { think: "high" },
+    });
+    const built = wrapped.buildRequest(messages, "gpt-oss:20b", options);
+    expect(bodyOf(built)["think"]).toBe("high");
+  });
+
+  test("a configured think: max override appears in the built request body", () => {
+    const wrapped = createOllamaAdapter(source, {
+      default: { think: "max" },
+    });
+    const built = wrapped.buildRequest(messages, "qwen3", options);
+    expect(bodyOf(built)["think"]).toBe("max");
+  });
+
+  test("an unconfigured think override is omitted from the built request body", () => {
+    const wrapped = createOllamaAdapter(source, {});
+    const built = wrapped.buildRequest(messages, "gpt-oss:20b", options);
+    expect(bodyOf(built)).not.toHaveProperty("think");
   });
 
   test("a per-model override beats the general default", () => {
@@ -258,5 +280,93 @@ describe("createOllamaAdapter", () => {
       },
       source,
     });
+  });
+
+  test("buildRequest rejects a url-kind image_url", () => {
+    const wrapped = createOllamaAdapter(source, undefined);
+    const withUrlImage: ConversationTurn[] = [
+      {
+        role: "user",
+        timestamp: 0,
+        content: [
+          {
+            type: "image",
+            source: {
+              kind: "url",
+              mimeType: "image/png",
+              url: "https://example.com/cat.png",
+            },
+          },
+        ],
+      },
+    ];
+    expect(() =>
+      wrapped.buildRequest(withUrlImage, "gpt-oss:20b", options),
+    ).toThrow("https://example.com/cat.png");
+  });
+
+  test("buildRequest rejects a file-reference image", () => {
+    const wrapped = createOllamaAdapter(source, undefined);
+    const withFileRefImage: ConversationTurn[] = [
+      {
+        role: "user",
+        timestamp: 0,
+        content: [
+          {
+            type: "image",
+            source: {
+              kind: "file-reference",
+              mimeType: "image/png",
+              reference: "file_abc123",
+            },
+          },
+        ],
+      },
+    ];
+    expect(() =>
+      wrapped.buildRequest(withFileRefImage, "gpt-oss:20b", options),
+    ).toThrow(/@corbits\/ollama-adapter[\s\S]*file_abc123/);
+  });
+
+  test("buildRequest accepts a base64 image_url", () => {
+    const wrapped = createOllamaAdapter(source, undefined);
+    const withBase64Image: ConversationTurn[] = [
+      {
+        role: "user",
+        timestamp: 0,
+        content: [
+          {
+            type: "image",
+            source: { kind: "base64", mimeType: "image/png", data: "Zm9v" },
+          },
+        ],
+      },
+    ];
+    expect(() =>
+      wrapped.buildRequest(withBase64Image, "gpt-oss:20b", options),
+    ).not.toThrow();
+  });
+});
+
+describe("createOllamaAnthropicAdapter", () => {
+  test("buildRequest targets Anthropic /v1/messages", () => {
+    const wrapped = createOllamaAnthropicAdapter(source, undefined);
+    const built = wrapped.buildRequest(messages, "gpt-oss:20b", options);
+    expect(built.url).toBe("/v1/messages");
+  });
+
+  test("does not overlay OpenAI-compat num_ctx onto the Anthropic body", () => {
+    const wrapped = createOllamaAnthropicAdapter(source, {
+      default: { numCtx: 32768, think: "high" },
+    });
+    const body = bodyOf(wrapped.buildRequest(messages, "gpt-oss:20b", options));
+    expect(body).not.toHaveProperty("options");
+    expect(body).not.toHaveProperty("think");
+  });
+
+  test("preserves the stock Anthropic adapter's response parser", () => {
+    const wrapped = createOllamaAnthropicAdapter(source, undefined);
+    expect(typeof wrapped.parseResponse).toBe("function");
+    expect(typeof wrapped.parseJSONResponse).toBe("function");
   });
 });
