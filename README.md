@@ -74,4 +74,6 @@ with exactly one choice, no error, no effect. A caller relying on any of
 these would silently get different behavior than requested with nothing
 to signal it. `buildRequest` rejects a `providerOptions` bag carrying any
 of these four keys with an error naming the parameter, rather than let
-the request through as a silent no-op.
+the request through as a silent no-op. Other leftover `providerOptions`
+keys are not forwarded either: Interchange's OpenAI `buildRequest` never
+merges `providerOptions` into the body, so they never land on the wire.

@@ -248,12 +248,11 @@ describe("createOllamaAdapter", () => {
     },
   );
 
-  test("buildRequest accepts providerOptions with none of the dropped keys", () => {
+  test("leftover providerOptions keys are not merged onto the request body", () => {
     const wrapped = createOllamaAdapter(source, undefined);
-    expect(() =>
-      wrapped.buildRequest(messages, "gpt-oss:20b", {
-        providerOptions: { somethingElse: true },
-      }),
-    ).not.toThrow();
+    const built = wrapped.buildRequest(messages, "gpt-oss:20b", {
+      providerOptions: { somethingElse: true },
+    });
+    expect(bodyOf(built)).not.toHaveProperty("somethingElse");
   });
 });
