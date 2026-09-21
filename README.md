@@ -71,7 +71,9 @@ OpenAI-compatible surface, just a different base URL and auth scheme. An
 `InferenceSource` pointed at Ollama Cloud instead of a local install
 needs:
 
-- **Base URL**: `https://ollama.com/api/`
+- **Base URL**: `https://ollama.com/v1` (OpenAI-compat). This adapter
+  concatenates `/chat/completions`; native `https://ollama.com/api/` is a
+  different surface and would miss `/v1/chat/completions`.
 - **Auth**: `Authorization: Bearer <key>`, with the key generated at
   [ollama.com/settings/keys](https://ollama.com/settings/keys)
 - **Models**: the cloud-hosted catalog is listed at
