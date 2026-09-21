@@ -11,6 +11,40 @@ function textDelta(token: string, seq = 1): InferenceEvent {
   };
 }
 
+function isThinkingDelta(
+  event: InferenceEvent,
+): event is Extract<InferenceEvent, { type: "inference.thinking.delta" }> {
+  return event.type === "inference.thinking.delta";
+}
+
+function isTextDelta(
+  event: InferenceEvent,
+): event is Extract<InferenceEvent, { type: "inference.text.delta" }> {
+  return event.type === "inference.text.delta";
+}
+
+function requireThinkingDelta(
+  event: InferenceEvent | undefined,
+): Extract<InferenceEvent, { type: "inference.thinking.delta" }> {
+  if (!event || !isThinkingDelta(event)) {
+    throw new Error(
+      `expected inference.thinking.delta, got ${event?.type ?? "undefined"}`,
+    );
+  }
+  return event;
+}
+
+function requireTextDelta(
+  event: InferenceEvent | undefined,
+): Extract<InferenceEvent, { type: "inference.text.delta" }> {
+  if (!event || !isTextDelta(event)) {
+    throw new Error(
+      `expected inference.text.delta, got ${event?.type ?? "undefined"}`,
+    );
+  }
+  return event;
+}
+
 describe("reclassifyThinkingEvents", () => {
   test("a whole <think>...</think> span in one token becomes thinking-delta, not text-delta", () => {
     const state = createThinkSplitState();
@@ -20,11 +54,9 @@ describe("reclassifyThinkingEvents", () => {
     );
     expect(out).toHaveLength(2);
     expect(out[0]?.type).toBe("inference.thinking.delta");
-    expect((out[0]?.data as { token: string }).token).toBe("plan the approach");
+    expect(requireThinkingDelta(out[0]).data.token).toBe("plan the approach");
     expect(out[1]?.type).toBe("inference.text.delta");
-    expect((out[1]?.data as { token: string }).token).toBe(
-      "Here is the answer.",
-    );
+    expect(requireTextDelta(out[1]).data.token).toBe("Here is the answer.");
   });
 
   test("a <think> span split across multiple chunks stays classified as thinking across the boundary", () => {
@@ -42,9 +74,9 @@ describe("reclassifyThinkingEvents", () => {
     expect(first[0]?.type).toBe("inference.thinking.delta");
     expect(second).toHaveLength(2);
     expect(second[0]?.type).toBe("inference.thinking.delta");
-    expect((second[0]?.data as { token: string }).token).toBe("step two");
+    expect(requireThinkingDelta(second[0]).data.token).toBe("step two");
     expect(second[1]?.type).toBe("inference.text.delta");
-    expect((second[1]?.data as { token: string }).token).toBe("final reply");
+    expect(requireTextDelta(second[1]).data.token).toBe("final reply");
   });
 
   test("ordinary text with no <think> tag passes through as text-delta unchanged", () => {
@@ -77,16 +109,10 @@ describe("reclassifyThinkingEvents", () => {
       [textDelta("<think>internal notes</think>visible reply", 3)],
       state,
     );
-    const thinkingEvent = out.find(
-      (event) => event.type === "inference.thinking.delta",
-    );
-    const textEvent = out.find(
-      (event) => event.type === "inference.text.delta",
-    );
-    expect((thinkingEvent?.data as { index?: number }).index).not.toBe(
-      (textEvent?.data as { index?: number }).index,
-    );
-    expect((textEvent?.data as { index?: number }).index).toBe(0);
+    const thinkingEvent = out.find(isThinkingDelta);
+    const textEvent = out.find(isTextDelta);
+    expect(thinkingEvent?.data.index).not.toBe(textEvent?.data.index);
+    expect(textEvent?.data.index).toBe(0);
   });
 
   test("cumulative partial.text/partial.thinking reflect only their own kind, never the raw tags", () => {
@@ -95,22 +121,11 @@ describe("reclassifyThinkingEvents", () => {
       [textDelta("<think>internal notes</think>visible reply")],
       state,
     );
-    const thinkingEvent = out.find(
-      (event) => event.type === "inference.thinking.delta",
-    );
-    const textEvent = out.find(
-      (event) => event.type === "inference.text.delta",
-    );
-    expect(
-      (thinkingEvent?.data as { partial: { thinking?: string } }).partial
-        .thinking,
-    ).toBe("internal notes");
-    expect(
-      (textEvent?.data as { partial: { text: string } }).partial.text,
-    ).toBe("visible reply");
-    expect(
-      (textEvent?.data as { partial: { text: string } }).partial.text,
-    ).not.toContain("<think>");
+    const thinkingEvent = out.find(isThinkingDelta);
+    const textEvent = out.find(isTextDelta);
+    expect(thinkingEvent?.data.partial.thinking).toBe("internal notes");
+    expect(textEvent?.data.partial.text).toBe("visible reply");
+    expect(textEvent?.data.partial.text).not.toContain("<think>");
   });
 
   test("once a native thinking.delta has been seen, text deltas pass through without tag-splitting", () => {
