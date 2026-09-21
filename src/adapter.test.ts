@@ -88,6 +88,22 @@ function argumentFragments(events: readonly InferenceEvent[]): string {
     .join("");
 }
 
+function imageUrlFromBody(body: Record<string, unknown>): string | undefined {
+  const messages = body["messages"];
+  if (!Array.isArray(messages)) return undefined;
+  const first = messages[0];
+  if (!isPlainObject(first) || !Array.isArray(first["content"]))
+    return undefined;
+  for (const part of first["content"]) {
+    if (!isPlainObject(part) || part["type"] !== "image_url") continue;
+    const imageUrl = part["image_url"];
+    if (isPlainObject(imageUrl) && typeof imageUrl["url"] === "string") {
+      return imageUrl["url"];
+    }
+  }
+  return undefined;
+}
+
 function expectSharedToolCallId(events: readonly InferenceEvent[]): void {
   const ids = events
     .filter(isToolCallStartOrDelta)
@@ -277,12 +293,6 @@ describe("createOllamaAdapter", () => {
     ];
     const built = wrapped.buildRequest(withImage, "gpt-oss:20b", options);
     const body = bodyOf(built);
-    const wireMessages = body["messages"] as {
-      content: { type: string; image_url?: { url: string } }[];
-    }[];
-    const imagePart = wireMessages[0]?.content.find(
-      (part) => part.type === "image_url",
-    );
-    expect(imagePart?.image_url?.url).toBe("data:image/png;base64,Zm9v");
+    expect(imageUrlFromBody(body)).toBe("data:image/png;base64,Zm9v");
   });
 });
