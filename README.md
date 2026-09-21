@@ -1,13 +1,28 @@
 # @corbits/ollama-adapter
 
-A custom Interchange inference adapter for the `ollama` provider key
-(Ollama's `openai-compatible` endpoint, `/v1`). It wraps the built-in
-OpenAI Chat Completions adapter — reusing its message marshaling, SSE
-parsing, and retry/pacing header extraction unchanged — and adds one
-thing: operator-configured overrides for context window, max output
-tokens, and reasoning effort, applied to every built request body.
+A custom Interchange inference adapter for the `ollama` provider key.
+Ollama documents two HTTP surfaces as first-class, and this package
+supports both:
 
-## Why
+- **OpenAI-compat** `POST /v1/chat/completions` (local
+  `http://localhost:11434/v1/chat/completions`, cloud
+  `https://ollama.com/v1/chat/completions`) —
+  [OpenAI compatibility](https://docs.ollama.com/api/openai-compatibility).
+  `createOllamaAdapter` wraps Interchange's built-in OpenAI Chat
+  Completions adapter against this surface.
+- **Anthropic** `POST /v1/messages` (local
+  `http://localhost:11434/v1/messages`, cloud
+  `https://ollama.com/v1/messages`) —
+  [Anthropic compatibility](https://docs.ollama.com/api/anthropic-compatibility).
+  Interchange's stock `createAnthropicAdapter` talks to this surface
+  without this package's OpenAI-compat workarounds.
+
+Neither surface replaces the other. OpenAI-compat is where per-request
+`num_ctx` and this adapter's think-tag / inline-tool-JSON repairs live.
+Anthropic is where Ollama emits native `thinking` and `tool_use` blocks.
+Pick the surface that matches the model and the fields you need.
+
+## Why the OpenAI-compat wrapper exists
 
 Ollama's `/v1/chat/completions` endpoint has no OpenAI-shaped field for
 context window (`num_ctx`); it only takes it through the endpoint's
@@ -17,6 +32,10 @@ silently ignored. `max_tokens` (mapped internally to Ollama's
 `num_predict`) and `reasoning_effort` (recognized for `gpt-oss` models)
 both ride through fields the built-in adapter already sets, so this
 adapter just lets an operator override them.
+
+The wrapper reuses the built-in OpenAI adapter's message marshaling, SSE
+parsing, and retry/pacing header extraction unchanged, then applies
+operator-configured overrides to every built request body.
 
 ## Activating it
 
@@ -31,6 +50,11 @@ SIDECAR_ADAPTER_MANIFEST=[{"provider":"ollama","specifier":"@corbits/ollama-adap
 the manifest names an already-installed module, it never carries code of
 its own. See the root `.env.example` for the full `SIDECAR_ADAPTER_MANIFEST`
 contract.
+
+To drive Ollama through Anthropic `/v1/messages` instead, point an
+`InferenceSource` at that base URL and use Interchange's stock
+`createAnthropicAdapter`. This package does not replace that adapter
+and does not remove the OpenAI-compat wrapper.
 
 ## Configuring overrides
 
@@ -55,6 +79,7 @@ provider's model). The shape:
 ```
 
 - `numCtx` — positive integer, sets `options.num_ctx` on the request body.
+  OpenAI-compat only; Anthropic `/v1/messages` has no context-window field.
 - `maxOutputTokens` — positive integer, overrides whichever max-tokens
   field the built-in adapter set (`max_tokens` or `max_completion_tokens`).
 - `reasoningEffort` — `"low" | "medium" | "high"`, sets `reasoning_effort`.
@@ -107,21 +132,17 @@ cleanly when Ollama is unreachable, the model is missing, or
   both expose; the stock Anthropic adapter's `buildRequest` builds a fixed
   set of top-level keys with nowhere to add one. Setting `num_ctx` against
   this endpoint is only possible via `OLLAMA_CONTEXT_LENGTH` at the Ollama
-  server level (a deployment-wide default, not a per-request override), or
-  by not switching this adapter over.
+  server level (a deployment-wide default, not a per-request override).
+  Per-request `num_ctx` stays on the OpenAI-compat wrapper.
 
-### Decision: replace
+### Decision: support both
 
-Chat, streaming, tool calls, and thinking all work correctly through the
-unmodified stock Anthropic adapter, with better fidelity than the current
-custom adapter's OpenAI-compat workarounds (native thinking blocks instead
-of tag-stripped text, native tool_use instead of inline-JSON salvage). The
-decision is to **replace this package's custom OpenAI-compat wrapper with
-a thin preset over the stock Anthropic adapter** for the `ollama` provider
-key. The one capability the OpenAI-compat path had that the Anthropic
-path does not is `num_ctx` — that override has no wire location on
-`/v1/messages`, so a from-here adapter can carry `maxOutputTokens` and
-`reasoningEffort` overrides but not `numCtx`; operators needing a specific
-context window must set `OLLAMA_CONTEXT_LENGTH` on the server. This
-narrows what CL-8355 through CL-8359 need to do, and each of their PRs
-notes what still applies given the stock adapter's own behavior.
+Chat, streaming, tool calls, and thinking all work through the unmodified
+stock Anthropic adapter, with native thinking blocks and native `tool_use`
+on `/v1/messages`. That does **not** retire this package's OpenAI-compat
+wrapper. Ollama documents both surfaces; operators who need per-request
+`num_ctx`, think-tag stripping, or inline-tool-JSON salvage stay on
+`/v1/chat/completions` via `createOllamaAdapter`. Operators who want
+Anthropic-shaped thinking and tool_use stay on `/v1/messages` via the
+stock Anthropic adapter. CL-8355 through CL-8359 continue to apply to
+the OpenAI-compat path they already target.

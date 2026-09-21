@@ -1,7 +1,14 @@
-// The `ollama` provider adapter: the built-in OpenAI Chat Completions
-// adapter (SSE parsing, retry/pacing header extraction, message
-// marshaling — all unmodified), wrapped so `buildRequest` applies
-// operator-configured overrides onto the request body before it ships.
+// The `ollama` provider adapter wraps Interchange's built-in OpenAI Chat
+// Completions adapter against Ollama's OpenAI-compat `/v1/chat/completions`
+// (SSE parsing, retry/pacing header extraction, message marshaling — all
+// unmodified). `buildRequest` then applies operator-configured overrides
+// onto the request body before it ships.
+//
+// Ollama also serves Anthropic `/v1/messages` as a first-class surface
+// (docs.ollama.com/api/anthropic-compatibility.md). That path is not this
+// factory: stock `createAnthropicAdapter` talks to it; this wrapper stays
+// on OpenAI-compat because that is where `options.num_ctx` and the
+// OpenAI-compat think-tag / inline-tool-JSON repairs live.
 //
 // Ollama's openai-compatible `/v1/chat/completions` endpoint takes
 // `max_tokens` (mapped internally to Ollama's native `num_predict`) but has

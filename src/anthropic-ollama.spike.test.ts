@@ -1,8 +1,9 @@
-// CL-8354 spike: does Ollama's Anthropic-compatible `/v1/messages` endpoint
-// work behind Interchange's stock, unmodified Anthropic adapter? This test
-// drives `createAnthropicAdapter` from `@intx/inference/providers` directly
-// against a local Ollama — no custom adapter code from this package is
-// under test here. Findings are written up in README.md.
+// CL-8354 spike: Ollama's Anthropic-compatible `/v1/messages` is a
+// first-class surface alongside OpenAI-compat `/v1/chat/completions`. This
+// test drives `createAnthropicAdapter` from `@intx/inference/providers`
+// directly against a local Ollama — no custom adapter code from this
+// package is under test here. Findings are written up in README.md. The
+// shipped `createOllamaAdapter` remains the OpenAI-compat wrapper.
 import { describe, expect, test } from "bun:test";
 import { createAnthropicAdapter } from "@intx/inference/providers";
 import type {
