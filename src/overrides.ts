@@ -1,5 +1,5 @@
 // Typed operator overrides for the Ollama adapter's built request body:
-// context window, max output tokens, and reasoning effort. Threaded in as
+// context window, max output tokens, reasoning effort, and think. Threaded in as
 // the `quirks` argument `loadAdapterRegistry`'s resolved factory receives
 // (an `InferenceSource.quirks` bag), never a loose passthrough object.
 
@@ -8,10 +8,14 @@ import { type } from "arktype";
 export const ReasoningEffort = type("'low' | 'medium' | 'high'");
 export type ReasoningEffort = typeof ReasoningEffort.infer;
 
+export const Think = type("boolean | 'low' | 'medium' | 'high' | 'max'");
+export type Think = typeof Think.infer;
+
 export const OllamaAdapterOverride = type({
   "numCtx?": "number.integer > 0",
   "maxOutputTokens?": "number.integer > 0",
   "reasoningEffort?": ReasoningEffort,
+  "think?": Think,
   "+": "reject",
 });
 export type OllamaAdapterOverride = typeof OllamaAdapterOverride.infer;
@@ -59,5 +63,7 @@ export function resolveOverride(
   if (maxOutputTokens !== undefined) resolved.maxOutputTokens = maxOutputTokens;
   const reasoningEffort = perModel.reasoningEffort ?? base.reasoningEffort;
   if (reasoningEffort !== undefined) resolved.reasoningEffort = reasoningEffort;
+  const think = perModel.think ?? base.think;
+  if (think !== undefined) resolved.think = think;
   return resolved;
 }

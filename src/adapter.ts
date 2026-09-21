@@ -1,7 +1,14 @@
-// The `ollama` provider adapter: the built-in OpenAI Chat Completions
-// adapter (SSE parsing, retry/pacing header extraction, message
-// marshaling — all unmodified), wrapped so `buildRequest` applies
-// operator-configured overrides onto the request body before it ships.
+// The `ollama` provider adapter wraps Interchange's built-in OpenAI Chat
+// Completions adapter against Ollama's OpenAI-compat `/v1/chat/completions`
+// (SSE parsing, retry/pacing header extraction, message marshaling — all
+// unmodified). `buildRequest` then applies operator-configured overrides
+// onto the request body before it ships.
+//
+// Ollama also serves Anthropic `/v1/messages` as a first-class surface
+// (docs.ollama.com/api/anthropic-compatibility.md). `createOllamaAnthropicAdapter`
+// wraps stock `createAnthropicAdapter` against that path; this OpenAI-compat
+// wrapper stays because that is where `options.num_ctx` and the
+// OpenAI-compat think-tag / inline-tool-JSON repairs live.
 //
 // Ollama's openai-compatible `/v1/chat/completions` endpoint takes
 // `max_tokens` (mapped internally to Ollama's native `num_predict`) but has
@@ -12,13 +19,18 @@
 // mode this adapter exists to rule out. Reasoning effort rides through the
 // same `reasoning_effort` field Ollama already recognizes for gpt-oss
 // models on this endpoint.
-import { createOpenAIAdapter } from "@intx/inference/providers";
-import type {
-  AdapterFactory,
-  BuiltRequest,
-  ProviderAdapter,
+import {
+  BEARER_CREDENTIAL_SENTINEL,
+  type AdapterFactory,
+  type BuiltRequest,
+  type ProviderAdapter,
 } from "@intx/inference";
+import {
+  createAnthropicAdapter,
+  createOpenAIAdapter,
+} from "@intx/inference/providers";
 import type {
+  ConversationTurn,
   InferenceEvent,
   LastCycleSource,
   TokenUsage,
@@ -51,6 +63,37 @@ function parseJsonObject(raw: string): Record<string, unknown> {
   return parsed;
 }
 
+// Ollama's OpenAI-compat and Anthropic `/v1/messages` surfaces only
+// accept base64 image bytes (docs.ollama.com/api/openai-compatibility.md
+// `data:` image_url; docs.ollama.com/api/anthropic-compatibility.md
+// "Image content (base64)"). They do not fetch a public URL the way
+// OpenAI/Anthropic themselves do. The built-in OpenAI adapter's `url`-kind
+// MediaSource support (see providers/openai.js) passes a public URL
+// straight through; the stock Anthropic adapter emits `type: "url"` /
+// `type: "file"` sources (see providers/anthropic.js `toAnthropicMediaSource`).
+// Against Ollama that lands as a request the server either fails on with
+// an opaque error or, worse, appears to accept while never actually
+// seeing the image. Rejecting the non-base64 source here, with the
+// offending URL named, surfaces the mismatch at the point the mistake
+// was made instead of downstream. Both factories share this gate.
+function rejectNonBase64Images(messages: readonly ConversationTurn[]): void {
+  for (const message of messages) {
+    for (const block of message.content) {
+      if (block.type !== "image") continue;
+      if (block.source.kind === "base64") continue;
+      const described =
+        block.source.kind === "url"
+          ? block.source.url
+          : `file-reference:${block.source.reference}`;
+      throw new Error(
+        `@corbits/ollama-adapter: image source must be base64; ` +
+          `Ollama does not fetch a ${block.source.kind} source ` +
+          `(received ${described}).`,
+      );
+    }
+  }
+}
+
 function applyOverride(
   built: BuiltRequest,
   override: OllamaAdapterOverride,
@@ -76,6 +119,9 @@ function applyOverride(
   }
   if (override.reasoningEffort !== undefined) {
     body["reasoning_effort"] = override.reasoningEffort;
+  }
+  if (override.think !== undefined) {
+    body["think"] = override.think;
   }
   return { ...built, body: JSON.stringify(body) };
 }
@@ -152,10 +198,10 @@ function withOllamaUsage(
 }
 
 /**
- * `AdapterFactory` for the `ollama` provider key, the named export a
- * `SIDECAR_ADAPTER_MANIFEST` entry points at. `quirks` is this package's
- * own {@link OllamaAdapterConfig} (an `InferenceSource.quirks` bag), not
- * the built-in adapter's `OpenAIQuirks` — the wrapped adapter is
+ * OpenAI-compat `AdapterFactory` for Ollama `/v1/chat/completions`. A
+ * `SIDECAR_ADAPTER_MANIFEST` entry may name this export. `quirks` is this
+ * package's own {@link OllamaAdapterConfig} (an `InferenceSource.quirks`
+ * bag), not the built-in adapter's `OpenAIQuirks` — the wrapped adapter is
  * constructed with no quirks of its own, so its request/response handling
  * is exactly the shipped default except for this override pass.
  */
@@ -176,6 +222,7 @@ export const createOllamaAdapter: AdapterFactory = (
   return {
     ...inner,
     buildRequest: (messages, model, options) => {
+      rejectNonBase64Images(messages);
       setDeclaredToolNames(streamInlineState, options.tools);
       setDeclaredToolNames(jsonInlineState, options.tools);
       return applyOverride(
@@ -211,3 +258,53 @@ export const createOllamaAdapter: AdapterFactory = (
       ),
   };
 };
+
+/**
+ * Anthropic `AdapterFactory` for Ollama `/v1/messages`. A
+ * `SIDECAR_ADAPTER_MANIFEST` entry may name this export instead of
+ * {@link createOllamaAdapter}. Wraps Interchange's stock
+ * `createAnthropicAdapter` with no OpenAI-compat think-tag stripping,
+ * inline-tool-JSON salvage, or `num_ctx` overlay — that surface has no
+ * context-window field. Non-base64 images are rejected the same way as
+ * on the OpenAI-compat factory; Ollama's Anthropic surface only accepts
+ * base64 image content. `quirks` is still parsed as
+ * {@link OllamaAdapterConfig} so a shared sidecar bag does not 400 the
+ * stock Anthropic quirks validator; the values are unused on this path.
+ *
+ * Workbench catalog and Cloud sources already use a `/v1` base
+ * (`http://localhost:11434/v1`, `https://ollama.com/v1`). The harness
+ * concatenates `baseURL + built.url`, so this factory emits `/messages`
+ * (matching OpenAI-compat `/chat/completions`) rather than stock
+ * Anthropic `/v1/messages`, which would wire as `/v1/v1/messages`.
+ * Ollama Cloud expects `Authorization: Bearer`, so the stock
+ * `x-api-key` header is replaced with the same bearer credential
+ * sentinel {@link createOllamaAdapter} inherits from OpenAI-compat.
+ */
+export const createOllamaAnthropicAdapter: AdapterFactory = (
+  source: LastCycleSource,
+  quirks?: unknown,
+): ProviderAdapter => {
+  parseOllamaAdapterConfig(quirks);
+  const inner = createAnthropicAdapter(source);
+  return {
+    ...inner,
+    buildRequest: (messages, model, options) => {
+      rejectNonBase64Images(messages);
+      return withOllamaAnthropicWire(
+        inner.buildRequest(messages, model, options),
+      );
+    },
+  };
+};
+
+function withOllamaAnthropicWire(built: BuiltRequest): BuiltRequest {
+  const { ["x-api-key"]: _dropped, ...headers } = built.headers;
+  return {
+    ...built,
+    url: "/messages",
+    headers: {
+      ...headers,
+      authorization: BEARER_CREDENTIAL_SENTINEL,
+    },
+  };
+}

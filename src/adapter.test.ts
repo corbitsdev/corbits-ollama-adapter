@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { BEARER_CREDENTIAL_SENTINEL } from "@intx/inference";
 import { createOpenAIAdapter } from "@intx/inference/providers";
 import type { LastCycleSource } from "@intx/types/runtime";
 import type {
@@ -8,7 +9,7 @@ import type {
   ToolDefinition,
 } from "@intx/types/runtime";
 
-import { createOllamaAdapter } from "./adapter";
+import { createOllamaAdapter, createOllamaAnthropicAdapter } from "./adapter";
 
 const source: LastCycleSource = {
   sourceId: "ollama-test",
@@ -45,6 +46,12 @@ function bodyOf(built: { body: string }): Record<string, unknown> {
     throw new Error("expected request body to be a JSON object");
   }
   return parsed;
+}
+
+/** Mirrors `@intx/inference` harness `resolveURL`: string concat of base + path. */
+function resolveHarnessURL(path: string, baseURL: string): string {
+  const base = baseURL.endsWith("/") ? baseURL.slice(0, -1) : baseURL;
+  return base + path;
 }
 
 function isToolCallStart(
@@ -125,6 +132,28 @@ describe("createOllamaAdapter", () => {
     });
     const built = wrapped.buildRequest(messages, "gpt-oss:20b", options);
     expect(bodyOf(built)["reasoning_effort"]).toBe("high");
+  });
+
+  test("a configured think override appears in the built request body", () => {
+    const wrapped = createOllamaAdapter(source, {
+      default: { think: "high" },
+    });
+    const built = wrapped.buildRequest(messages, "gpt-oss:20b", options);
+    expect(bodyOf(built)["think"]).toBe("high");
+  });
+
+  test("a configured think: max override appears in the built request body", () => {
+    const wrapped = createOllamaAdapter(source, {
+      default: { think: "max" },
+    });
+    const built = wrapped.buildRequest(messages, "qwen3", options);
+    expect(bodyOf(built)["think"]).toBe("max");
+  });
+
+  test("an unconfigured think override is omitted from the built request body", () => {
+    const wrapped = createOllamaAdapter(source, {});
+    const built = wrapped.buildRequest(messages, "gpt-oss:20b", options);
+    expect(bodyOf(built)).not.toHaveProperty("think");
   });
 
   test("a per-model override beats the general default", () => {
@@ -258,5 +287,184 @@ describe("createOllamaAdapter", () => {
       },
       source,
     });
+  });
+
+  test("buildRequest rejects a url-kind image_url", () => {
+    const wrapped = createOllamaAdapter(source, undefined);
+    const withUrlImage: ConversationTurn[] = [
+      {
+        role: "user",
+        timestamp: 0,
+        content: [
+          {
+            type: "image",
+            source: {
+              kind: "url",
+              mimeType: "image/png",
+              url: "https://example.com/cat.png",
+            },
+          },
+        ],
+      },
+    ];
+    expect(() =>
+      wrapped.buildRequest(withUrlImage, "gpt-oss:20b", options),
+    ).toThrow("https://example.com/cat.png");
+  });
+
+  test("buildRequest rejects a file-reference image", () => {
+    const wrapped = createOllamaAdapter(source, undefined);
+    const withFileRefImage: ConversationTurn[] = [
+      {
+        role: "user",
+        timestamp: 0,
+        content: [
+          {
+            type: "image",
+            source: {
+              kind: "file-reference",
+              mimeType: "image/png",
+              reference: "file_abc123",
+            },
+          },
+        ],
+      },
+    ];
+    expect(() =>
+      wrapped.buildRequest(withFileRefImage, "gpt-oss:20b", options),
+    ).toThrow(/@corbits\/ollama-adapter[\s\S]*file_abc123/);
+  });
+
+  test("buildRequest accepts a base64 image_url", () => {
+    const wrapped = createOllamaAdapter(source, undefined);
+    const withBase64Image: ConversationTurn[] = [
+      {
+        role: "user",
+        timestamp: 0,
+        content: [
+          {
+            type: "image",
+            source: { kind: "base64", mimeType: "image/png", data: "Zm9v" },
+          },
+        ],
+      },
+    ];
+    expect(() =>
+      wrapped.buildRequest(withBase64Image, "gpt-oss:20b", options),
+    ).not.toThrow();
+  });
+});
+
+describe("createOllamaAnthropicAdapter", () => {
+  test("buildRequest targets Anthropic /messages against a /v1 source base", () => {
+    const wrapped = createOllamaAnthropicAdapter(source, undefined);
+    const built = wrapped.buildRequest(messages, "gpt-oss:20b", options);
+    expect(built.url).toBe("/messages");
+  });
+
+  test("a /v1 source base concatenates to /v1/messages, not /v1/v1/messages", () => {
+    const wrapped = createOllamaAnthropicAdapter(source, undefined);
+    const built = wrapped.buildRequest(messages, "gpt-oss:20b", options);
+    const catalogBase = "http://localhost:11434/v1";
+    const cloudBase = "https://ollama.com/v1";
+    expect(resolveHarnessURL(built.url, catalogBase)).toBe(
+      "http://localhost:11434/v1/messages",
+    );
+    expect(resolveHarnessURL(built.url, cloudBase)).toBe(
+      "https://ollama.com/v1/messages",
+    );
+    expect(resolveHarnessURL(built.url, catalogBase)).not.toContain(
+      "/v1/v1/messages",
+    );
+    expect(resolveHarnessURL(built.url, `${catalogBase}/`)).not.toContain(
+      "/v1/v1/messages",
+    );
+  });
+
+  test("buildRequest uses the Bearer credential sentinel, not x-api-key", () => {
+    const wrapped = createOllamaAnthropicAdapter(source, undefined);
+    const built = wrapped.buildRequest(messages, "gpt-oss:20b", options);
+    expect(built.headers["authorization"]).toBe(BEARER_CREDENTIAL_SENTINEL);
+    expect(built.headers).not.toHaveProperty("x-api-key");
+  });
+
+  test("does not overlay OpenAI-compat num_ctx onto the Anthropic body", () => {
+    const wrapped = createOllamaAnthropicAdapter(source, {
+      default: { numCtx: 32768, think: "high" },
+    });
+    const body = bodyOf(wrapped.buildRequest(messages, "gpt-oss:20b", options));
+    expect(body).not.toHaveProperty("options");
+    expect(body).not.toHaveProperty("think");
+  });
+
+  test("buildRequest rejects a url-kind image_url", () => {
+    const wrapped = createOllamaAnthropicAdapter(source, undefined);
+    const withUrlImage: ConversationTurn[] = [
+      {
+        role: "user",
+        timestamp: 0,
+        content: [
+          {
+            type: "image",
+            source: {
+              kind: "url",
+              mimeType: "image/png",
+              url: "https://example.com/cat.png",
+            },
+          },
+        ],
+      },
+    ];
+    expect(() =>
+      wrapped.buildRequest(withUrlImage, "gpt-oss:20b", options),
+    ).toThrow(/@corbits\/ollama-adapter[\s\S]*https:\/\/example.com\/cat.png/);
+  });
+
+  test("buildRequest rejects a file-reference image", () => {
+    const wrapped = createOllamaAnthropicAdapter(source, undefined);
+    const withFileRefImage: ConversationTurn[] = [
+      {
+        role: "user",
+        timestamp: 0,
+        content: [
+          {
+            type: "image",
+            source: {
+              kind: "file-reference",
+              mimeType: "image/png",
+              reference: "file_abc123",
+            },
+          },
+        ],
+      },
+    ];
+    expect(() =>
+      wrapped.buildRequest(withFileRefImage, "gpt-oss:20b", options),
+    ).toThrow(/@corbits\/ollama-adapter[\s\S]*file_abc123/);
+  });
+
+  test("buildRequest accepts a base64 image", () => {
+    const wrapped = createOllamaAnthropicAdapter(source, undefined);
+    const withBase64Image: ConversationTurn[] = [
+      {
+        role: "user",
+        timestamp: 0,
+        content: [
+          {
+            type: "image",
+            source: { kind: "base64", mimeType: "image/png", data: "Zm9v" },
+          },
+        ],
+      },
+    ];
+    expect(() =>
+      wrapped.buildRequest(withBase64Image, "gpt-oss:20b", options),
+    ).not.toThrow();
+  });
+
+  test("preserves the stock Anthropic adapter's response parser", () => {
+    const wrapped = createOllamaAnthropicAdapter(source, undefined);
+    expect(typeof wrapped.parseResponse).toBe("function");
+    expect(typeof wrapped.parseJSONResponse).toBe("function");
   });
 });

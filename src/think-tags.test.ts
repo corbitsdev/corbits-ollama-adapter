@@ -45,6 +45,13 @@ function requireTextDelta(
   return event;
 }
 
+function tokenOf(event: InferenceEvent): string {
+  if (isTextDelta(event) || isThinkingDelta(event)) {
+    return event.data.token;
+  }
+  return "";
+}
+
 describe("reclassifyThinkingEvents", () => {
   test("a whole <think>...</think> span in one token becomes thinking-delta, not text-delta", () => {
     const state = createThinkSplitState();
@@ -126,5 +133,87 @@ describe("reclassifyThinkingEvents", () => {
     expect(thinkingEvent?.data.partial.thinking).toBe("internal notes");
     expect(textEvent?.data.partial.text).toBe("visible reply");
     expect(textEvent?.data.partial.text).not.toContain("<think>");
+  });
+
+  test("once a native thinking.delta has been seen, text deltas pass through without tag-splitting", () => {
+    const state = createThinkSplitState();
+    const nativeThinking: InferenceEvent = {
+      type: "inference.thinking.delta",
+      seq: 1,
+      data: {
+        token: "reasoning from the reasoning field",
+        partial: { text: "" },
+        index: -1,
+      },
+    };
+    const first = reclassifyThinkingEvents([nativeThinking], state);
+    expect(first).toEqual([nativeThinking]);
+
+    // A literal "<think>" appearing in ordinary content after the model
+    // already reported reasoning natively must not be mistaken for a tag
+    // span — the native path already carried the real reasoning.
+    const coincidental = textDelta("here is <think>literally in the reply");
+    const second = reclassifyThinkingEvents([coincidental], state);
+    expect(second).toEqual([coincidental]);
+  });
+
+  test("an open think span does not leak leftover tags once a native thinking.delta arrives", () => {
+    const state = createThinkSplitState();
+    const opened = reclassifyThinkingEvents(
+      [textDelta("<think>partial")],
+      state,
+    );
+    expect(opened).toHaveLength(1);
+    expect(opened[0]?.type).toBe("inference.thinking.delta");
+
+    const nativeThinking: InferenceEvent = {
+      type: "inference.thinking.delta",
+      seq: 2,
+      data: {
+        token: "reasoning from the reasoning field",
+        partial: { text: "" },
+        index: -1,
+      },
+    };
+    reclassifyThinkingEvents([nativeThinking], state);
+
+    const after = reclassifyThinkingEvents(
+      [textDelta(" leftover</think>visible")],
+      state,
+    );
+    const tokens = after.map(tokenOf);
+    expect(tokens.join("")).not.toContain("<think>");
+    expect(tokens.join("")).not.toContain("</think>");
+    expect(after.filter(isThinkingDelta)).toEqual([]);
+    expect(requireTextDelta(after[0]).data.token).toBe(" leftovervisible");
+  });
+
+  test("unclosed think span after native thinking does not swallow later text", () => {
+    const state = createThinkSplitState();
+    const opened = reclassifyThinkingEvents(
+      [textDelta("<think>partial")],
+      state,
+    );
+    expect(opened).toHaveLength(1);
+    expect(opened[0]?.type).toBe("inference.thinking.delta");
+
+    const nativeThinking: InferenceEvent = {
+      type: "inference.thinking.delta",
+      seq: 2,
+      data: {
+        token: "reasoning from the reasoning field",
+        partial: { text: "" },
+        index: -1,
+      },
+    };
+    reclassifyThinkingEvents([nativeThinking], state);
+
+    const after = reclassifyThinkingEvents(
+      [textDelta("The answer is 42")],
+      state,
+    );
+    expect(after).toHaveLength(1);
+    expect(after[0]?.type).toBe("inference.text.delta");
+    expect(requireTextDelta(after[0]).data.token).toBe("The answer is 42");
   });
 });

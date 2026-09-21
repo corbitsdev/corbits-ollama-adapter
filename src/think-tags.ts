@@ -1,13 +1,18 @@
-// Ollama's OpenAI-compatible endpoint never populates the `reasoning`/
-// `reasoning_content` delta fields `@intx/inference`'s OpenAI provider
-// looks for (see `providers/openai.js`'s `reasoningFieldNames` handling).
-// gpt-oss and qwen instead emit their chain-of-thought inline inside the
-// ordinary `content` field, wrapped in `<think>…</think>`. Left alone, that
-// text is indistinguishable from the reply and rides every hop downstream
-// as a genuine `inference.text.delta` leak. This
-// module reclassifies it into `inference.thinking.delta` before anything
-// else ever sees it, at the one place that already knows these tokens came
-// from Ollama.
+// Some Ollama models populate the `reasoning`/`reasoning_content` delta
+// fields `@intx/inference`'s OpenAI provider already classifies as
+// `inference.thinking.delta` (see `providers/openai.js`'s
+// `reasoningFieldNames` handling) — typically when `think` is set on the
+// request. Other models still emit chain-of-thought inline in `content`,
+// wrapped in `<think>…</think>`. Left alone, that tagged text is
+// indistinguishable from the reply and rides every hop downstream as a
+// genuine `inference.text.delta` leak. This module reclassifies inline
+// tags into `inference.thinking.delta` as a fallback, at the one place
+// that already knows these tokens came from Ollama. Once a native
+// thinking field has been seen for a response, tag-splitting stops so a
+// coincidental literal "<think>" in ordinary text cannot be mistaken for
+// a span. An already-open tag span is abandoned (later text is answer
+// text, not thinking) and leftover `</think>` is stripped so it cannot
+// leak as text.
 import type { InferenceEvent } from "@intx/types/runtime";
 
 /** Carries the split state across every chunk of one streamed response —
@@ -23,10 +28,30 @@ export type ThinkSplitState = {
   everInThink: boolean;
   textAcc: string;
   thinkingAcc: string;
+  /** Set once the built-in OpenAI adapter has already emitted a native
+   * `inference.thinking.delta` for this response (it reads `reasoning`/
+   * `reasoning_content` fields itself — see `providers/openai.js`'s
+   * `reasoningFieldNames` handling). A model given a `think` override
+   * (see overrides.ts) returns its reasoning that way, with no `<think>`
+   * tags anywhere in `content`; regex-splitting `content` on top of an
+   * already-classified native thinking stream is unnecessary and risks
+   * misfiring on a coincidental literal "<think>" in ordinary text. The
+   * tag splitter still runs as-is for a model that ignores `think` and
+   * falls back to inline tags. If a tag span was already open when native
+   * thinking arrives, it is abandoned so later answer text is not
+   * swallowed as thinking while waiting for `</think>`; leftover close
+   * tags are still stripped so they cannot leak. */
+  nativeThinkingSeen: boolean;
 };
 
 export function createThinkSplitState(): ThinkSplitState {
-  return { inThink: false, everInThink: false, textAcc: "", thinkingAcc: "" };
+  return {
+    inThink: false,
+    everInThink: false,
+    textAcc: "",
+    thinkingAcc: "",
+    nativeThinkingSeen: false,
+  };
 }
 
 const THINK_OPEN = "<think>";
@@ -99,8 +124,37 @@ export function reclassifyThinkingEvents(
   const output: InferenceEvent[] = [];
 
   for (const event of events) {
+    if (event.type === "inference.thinking.delta") {
+      state.nativeThinkingSeen = true;
+      state.inThink = false;
+      output.push(event);
+      continue;
+    }
+
     if (event.type !== "inference.text.delta") {
       output.push(event);
+      continue;
+    }
+
+    if (state.nativeThinkingSeen) {
+      const token = event.data.token;
+      if (!token.includes(THINK_CLOSE)) {
+        output.push(event);
+        continue;
+      }
+      const stripped = token.split(THINK_CLOSE).join("");
+      if (stripped === "") continue;
+      output.push({
+        type: "inference.text.delta",
+        seq: event.seq,
+        data: {
+          token: stripped,
+          partial: event.data.partial,
+          ...(event.data.index !== undefined
+            ? { index: event.data.index }
+            : {}),
+        },
+      });
       continue;
     }
 
