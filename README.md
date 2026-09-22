@@ -51,6 +51,7 @@ const local: InferenceSource = {
   id: "ollama/local",
   provider: "ollama",
   baseURL: "http://localhost:11434/v1",
+  apiKey: "ollama", // local daemon ignores the value; the field is required
   model: "gpt-oss:20b",
 };
 
