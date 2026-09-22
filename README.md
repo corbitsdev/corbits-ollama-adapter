@@ -15,7 +15,39 @@ yarn add @corbits/ollama-adapter
 bun add @corbits/ollama-adapter
 ```
 
-Build an adapter for one source directly — no sidecar needed. The host keeps its own provider id. Point the source `baseURL` at local `http://localhost:11434/v1` or Cloud `https://ollama.com/v1`: the host concatenates `baseURL + path`, so the factories emit `/chat/completions` and `/messages` (not `/v1/messages`), and both send `Authorization: Bearer`. The native `https://ollama.com/api/` surface uses different paths.
+A host never calls this package's factories directly. It installs the
+package in the sidecar's workspace, then registers a provider id on the
+sidecar's `SIDECAR_ADAPTER_MANIFEST` env var — a JSON array of
+`{ provider, specifier, export }` entries the sidecar validates and loads
+with `import()` at boot:
+
+```sh
+SIDECAR_ADAPTER_MANIFEST=[{"provider":"ollama","specifier":"@corbits/ollama-adapter","export":"createOllamaAdapter"}]
+```
+
+Use `"createOllamaAnthropicAdapter"` instead for the Anthropic surface. The
+Anthropic factory parses the same quirks bag so a shared sidecar config does
+not fail validation, then ignores the values — `/v1/messages` has no
+num_ctx / think overlay. A hub that spawns sidecars (e.g. Workbench's process
+provisioner) forwards its own `SIDECAR_ADAPTER_MANIFEST` to every sidecar it
+starts, so this is one setting at the hub, not per-sidecar config.
+
+Point the connected source's `baseURL` at local `http://localhost:11434/v1`
+or Cloud `https://ollama.com/v1`: the host concatenates `baseURL + path`, so
+the factories emit `/chat/completions` and `/messages` (not `/v1/messages`),
+and both send `Authorization: Bearer`. The native `https://ollama.com/api/`
+surface uses different paths. Send images as base64 on both factories. Cloud
+models are the catalog at
+[ollama.com/search?c=cloud](https://ollama.com/search?c=cloud), not whatever
+is pulled locally — this package leaves source selection and pricing to your
+Ollama account.
+
+## Lower-level: calling a factory directly
+
+`SIDECAR_ADAPTER_MANIFEST` loading is just `import()` plus a call to the
+named export — a host that resolves its own adapters (no sidecar-manifest
+step) can call either factory directly with a source and, for
+`createOllamaAdapter`, an overrides bag:
 
 ```ts
 import { createOllamaAdapter } from "@corbits/ollama-adapter";
@@ -32,10 +64,6 @@ export const adapter = createOllamaAdapter(source, {
   perModel: { "gpt-oss:20b": { reasoningEffort: "high" } },
 });
 ```
-
-A sidecar host registers either factory on the `ollama` provider key via `SIDECAR_ADAPTER_MANIFEST` with `specifier: "@corbits/ollama-adapter"` and `export: "createOllamaAdapter"` (or `"createOllamaAnthropicAdapter"` for the Anthropic surface) — install the package in the sidecar workspace first. The Anthropic factory parses the same quirks bag so a shared sidecar config does not fail validation, then ignores the values — `/v1/messages` has no num_ctx / think overlay.
-
-Send images as base64 on both factories. Cloud models are the catalog at [ollama.com/search?c=cloud](https://ollama.com/search?c=cloud), not whatever is pulled locally. Bring your own Cloud source — the package leaves source selection and pricing to your Ollama account.
 
 ## How it works
 
