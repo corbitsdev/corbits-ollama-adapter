@@ -15,69 +15,25 @@ yarn add @corbits/ollama-adapter
 bun add @corbits/ollama-adapter
 ```
 
-Register either factory on the `ollama` provider key via `SIDECAR_ADAPTER_MANIFEST`. Install the package in the sidecar workspace first — the manifest names a module.
-
-OpenAI-compat (`/v1/chat/completions`):
-
-```
-SIDECAR_ADAPTER_MANIFEST=[{"provider":"ollama","specifier":"@corbits/ollama-adapter","export":"createOllamaAdapter"}]
-```
-
-Anthropic (`/v1/messages`):
-
-```
-SIDECAR_ADAPTER_MANIFEST=[{"provider":"ollama","specifier":"@corbits/ollama-adapter","export":"createOllamaAnthropicAdapter"}]
-```
-
-Point the source `baseURL` at local `http://localhost:11434/v1` or Cloud `https://ollama.com/v1`. The host concatenates `baseURL + path`, so the factories emit `/chat/completions` and `/messages` (not `/v1/messages`). Both send `Authorization: Bearer`. Use `/v1` base URLs here; the native `https://ollama.com/api/` surface uses different paths.
+Build an adapter for one source directly — no sidecar needed. The host keeps its own provider id. Point the source `baseURL` at local `http://localhost:11434/v1` or Cloud `https://ollama.com/v1`: the host concatenates `baseURL + path`, so the factories emit `/chat/completions` and `/messages` (not `/v1/messages`), and both send `Authorization: Bearer`. The native `https://ollama.com/api/` surface uses different paths.
 
 ```ts
-import type { AdapterManifest } from "@intx/inference";
-import { loadAdapterRegistry } from "@intx/inference/providers";
-import type { InferenceSource } from "@intx/types/runtime";
+import { createOllamaAdapter } from "@corbits/ollama-adapter";
+import type { LastCycleSource } from "@intx/types/runtime";
 
-const manifest: AdapterManifest = [
-  {
-    provider: "ollama",
-    specifier: "@corbits/ollama-adapter",
-    export: "createOllamaAdapter",
-  },
-  // Or: export: "createOllamaAnthropicAdapter"
-];
-
-const adapters = await loadAdapterRegistry(manifest);
-
-const local: InferenceSource = {
-  id: "ollama/local",
+const source: LastCycleSource = {
+  sourceId: "ollama/local",
   provider: "ollama",
-  baseURL: "http://localhost:11434/v1",
-  apiKey: "ollama", // local daemon ignores the value; the field is required
   model: "gpt-oss:20b",
 };
 
-const cloud: InferenceSource = {
-  id: "ollama/cloud",
-  provider: "ollama",
-  baseURL: "https://ollama.com/v1",
-  apiKey: "<key from ollama.com/settings/keys>",
-  model: "gpt-oss:20b",
-};
-
-// OpenAI-compat quirks (createOllamaAdapter). The Anthropic factory parses
-// the same bag so a shared sidecar config does not fail validation, then
-// ignores the values — /v1/messages has no num_ctx / think overlay.
-const quirks = {
-  default: {
-    numCtx: 8192,
-    maxOutputTokens: 4096,
-    reasoningEffort: "medium",
-    think: "medium",
-  },
-  perModel: {
-    "gpt-oss:20b": { numCtx: 32768, reasoningEffort: "high" },
-  },
-};
+export const adapter = createOllamaAdapter(source, {
+  default: { numCtx: 8192, maxOutputTokens: 4096 },
+  perModel: { "gpt-oss:20b": { reasoningEffort: "high" } },
+});
 ```
+
+A sidecar host registers either factory on the `ollama` provider key via `SIDECAR_ADAPTER_MANIFEST` with `specifier: "@corbits/ollama-adapter"` and `export: "createOllamaAdapter"` (or `"createOllamaAnthropicAdapter"` for the Anthropic surface) — install the package in the sidecar workspace first. The Anthropic factory parses the same quirks bag so a shared sidecar config does not fail validation, then ignores the values — `/v1/messages` has no num_ctx / think overlay.
 
 Send images as base64 on both factories. Cloud models are the catalog at [ollama.com/search?c=cloud](https://ollama.com/search?c=cloud), not whatever is pulled locally. Bring your own Cloud source — the package leaves source selection and pricing to your Ollama account.
 
