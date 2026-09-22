@@ -30,13 +30,13 @@
     "arktype": "2.2.3"
   },
   "peerDependencies": {
-    "@intx/inference": ">=0.3.0",
-    "@intx/types": ">=0.3.0"
+    "@intx/inference": ">=0.4.0",
+    "@intx/types": ">=0.4.0"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
-    "@intx/inference": "0.3.0",
-    "@intx/types": "0.3.0",
+    "@intx/inference": "0.4.0",
+    "@intx/types": "0.4.0",
     "@types/bun": "1.3.14",
     "eslint": "10.10.0",
     "jiti": "2.7.0",
