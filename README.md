@@ -1,6 +1,6 @@
 # @corbits/ollama-adapter
 
-Interchange inference adapters for Ollama's two first-class HTTP surfaces. `createOllamaAdapter` wraps OpenAI-compat `POST /v1/chat/completions`; `createOllamaAnthropicAdapter` wraps Anthropic `POST /v1/messages`. Neither surface replaces the other.
+Interchange inference adapters for Ollama's two first-class HTTP surfaces. `createOllamaAdapter` wraps OpenAI-compat `POST /v1/chat/completions`; `createOllamaAnthropicAdapter` wraps Anthropic `POST /v1/messages`. Each surface keeps its native shape.
 
 ## Runtime support
 
@@ -15,7 +15,7 @@ yarn add @corbits/ollama-adapter
 bun add @corbits/ollama-adapter
 ```
 
-Register either factory on the `ollama` provider key via `SIDECAR_ADAPTER_MANIFEST`. The package must already be installed in the sidecar workspace — the manifest names a module, it never carries code.
+Register either factory on the `ollama` provider key via `SIDECAR_ADAPTER_MANIFEST`. Install the package in the sidecar workspace first — the manifest names a module.
 
 OpenAI-compat (`/v1/chat/completions`):
 
@@ -29,7 +29,7 @@ Anthropic (`/v1/messages`):
 SIDECAR_ADAPTER_MANIFEST=[{"provider":"ollama","specifier":"@corbits/ollama-adapter","export":"createOllamaAnthropicAdapter"}]
 ```
 
-Point the source `baseURL` at local `http://localhost:11434/v1` or Cloud `https://ollama.com/v1`. The harness concatenates `baseURL + path`, so the factories emit `/chat/completions` and `/messages` (not `/v1/messages`). Both send `Authorization: Bearer`. Native `https://ollama.com/api/` is a different surface and would miss those `/v1` paths.
+Point the source `baseURL` at local `http://localhost:11434/v1` or Cloud `https://ollama.com/v1`. The host concatenates `baseURL + path`, so the factories emit `/chat/completions` and `/messages` (not `/v1/messages`). Both send `Authorization: Bearer`. Use `/v1` base URLs here; the native `https://ollama.com/api/` surface uses different paths.
 
 ```ts
 import type { AdapterManifest } from "@intx/inference";
@@ -78,7 +78,7 @@ const quirks = {
 };
 ```
 
-Images must be base64 on both factories. A public URL or file reference is rejected before the request is sent. Cloud models are the catalog at [ollama.com/search?c=cloud](https://ollama.com/search?c=cloud), not whatever is pulled locally. This package ships no default Cloud source and no pricing assumptions.
+Send images as base64 on both factories. Cloud models are the catalog at [ollama.com/search?c=cloud](https://ollama.com/search?c=cloud), not whatever is pulled locally. Bring your own Cloud source — the package leaves source selection and pricing to your Ollama account.
 
 ## How it works
 
