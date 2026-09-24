@@ -1,4 +1,7 @@
-export { createOllamaAdapter, createOllamaAnthropicAdapter } from "./adapter";
+export {
+  createOllamaAdapter,
+  createOllamaAnthropicAdapter,
+} from "./adapter.js";
 export {
   OllamaAdapterConfig,
   OllamaAdapterOverride,
@@ -6,16 +9,16 @@ export {
   Think,
   parseOllamaAdapterConfig,
   resolveOverride,
-} from "./overrides";
+} from "./overrides.js";
 export {
   createThinkSplitState,
   reclassifyThinkingEvents,
   type ThinkSplitState,
-} from "./think-tags";
+} from "./think-tags.js";
 export {
   createInlineToolJsonState,
   reclassifyInlineToolJsonEvents,
   responseChunkIsTerminal,
   setDeclaredToolNames,
   type InlineToolJsonState,
-} from "./inline-tool-json";
+} from "./inline-tool-json.js";
