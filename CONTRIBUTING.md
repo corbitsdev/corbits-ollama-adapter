@@ -12,7 +12,15 @@ Bun >= 1.2 and Node >= 24 are the engines floors. The packed tarball ships compi
 
 ```sh
 bun install
-bun run check          # typecheck + lint + format:check + test
+bun run check          # typecheck + lint + format:check + unit tests
+bun run test:e2e       # inference-harness and live Ollama suites
 ```
 
-The live suites in `tests/` run only when `OLLAMA_BASE_URL` names an Ollama server (for example `http://host:11434`) and skip otherwise. `tests/live-ollama.test.ts` drives both factories with model `OLLAMA_MODEL` (default `gpt-oss:20b`); `tests/reasoning-live.test.ts` checks `reasoning` on both surfaces with model `OLLAMA_REASONING_MODEL` (default `qwen3:8b`).
+`e2e/harness.test.ts` drives the adapter through `@intx/inference-testing` and always runs. The live suites run only when `OLLAMA_BASE_URL` names an Ollama server (for example `http://host:11434`) and skip otherwise. `e2e/live-ollama.test.ts` drives both factories with model `OLLAMA_MODEL` (default `gpt-oss:20b`); `e2e/reasoning-live.test.ts` checks `reasoning` on both surfaces with model `OLLAMA_REASONING_MODEL` (default `qwen3:8b`).
+
+## Commit messages
+
+Commit subjects and PR titles follow [Conventional Commits](https://www.conventionalcommits.org): `feat`, `fix`, `refactor`, `test`, `docs`, `build`, `ci`, `perf`, and `chore(release): x.y.z` for releases.
+Add `!` only for public API breaks: removed or renamed exports, changed signatures, newly required params. Peer and dependency range changes are `build(deps):` with no `!`.
+Keep subjects imperative, lowercase after the colon, 72 characters or less, and free of ticket IDs.
+Every PR links its issue with a `Closes <issue id>` line in the PR body.

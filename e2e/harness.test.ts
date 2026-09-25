@@ -8,7 +8,7 @@ import {
 } from "@intx/inference-testing";
 import type { InferenceEvent, ToolDefinition } from "@intx/types/runtime";
 
-import { createOllamaAdapter } from "./adapter";
+import { createOllamaAdapter } from "../src/adapter";
 
 const memorySearchTool: ToolDefinition = {
   name: "memory_search",
