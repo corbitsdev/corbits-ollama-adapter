@@ -281,12 +281,22 @@ describe("createOllamaAdapter", () => {
     });
   });
 
+  test("reasoning rejects a thinking budget at or above max_tokens", () => {
+    const wrapped = createOllamaAnthropicAdapter(source, {
+      default: { reasoning: true },
+    });
+    expect(() =>
+      wrapped.buildRequest(messages, "qwen3:8b", { maxTokens: 1024 }),
+    ).toThrow("budget_tokens (1024) must be below max_tokens (1024)");
+  });
+
   test("reasoning keeps a caller-requested thinking budget", () => {
     const wrapped = createOllamaAnthropicAdapter(source, {
       default: { reasoning: "high" },
     });
     const body = bodyOf(
       wrapped.buildRequest(messages, "qwen3:8b", {
+        maxTokens: 8192,
         thinking: { enabled: true, budgetTokens: 4096 },
       }),
     );

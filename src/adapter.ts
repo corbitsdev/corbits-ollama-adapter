@@ -118,6 +118,19 @@ function anthropicThinkingOf(
   return { type: "enabled", budget_tokens: ANTHROPIC_THINKING_BUDGET_TOKENS };
 }
 
+function rejectBudgetAtOrAboveMaxTokens(body: Record<string, unknown>): void {
+  const thinking = body["thinking"];
+  if (!isPlainObject(thinking)) return;
+  const budget = thinking["budget_tokens"];
+  const maxTokens = body["max_tokens"];
+  if (typeof budget !== "number" || typeof maxTokens !== "number") return;
+  if (budget < maxTokens) return;
+  throw new Error(
+    `@corbits/ollama-adapter: thinking budget_tokens (${budget}) must be ` +
+      `below max_tokens (${maxTokens}); raise maxTokens or set reasoning: false.`,
+  );
+}
+
 function applyOverride(
   built: BuiltRequest,
   override: OllamaAdapterOverride,
@@ -329,6 +342,7 @@ function withOllamaAnthropicWire(
       override.reasoning,
       body["thinking"],
     );
+    rejectBudgetAtOrAboveMaxTokens(body);
   }
   return {
     ...built,

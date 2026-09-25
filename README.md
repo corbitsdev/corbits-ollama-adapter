@@ -76,6 +76,9 @@ per-call thinking option, except that a per-call `budgetTokens` is kept:
 | `"low"` / `"medium"` / `"high"` / `"max"` | `reasoning_effort` as given  | `thinking: { type: "enabled", budget_tokens: 1024 }` |
 | unset                                     | nothing                      | nothing                                              |
 
+On the messages factory, a thinking `budget_tokens` at or above `max_tokens`
+throws at `buildRequest`.
+
 ## Development
 
 ```sh
