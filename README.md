@@ -66,8 +66,9 @@ export const adapter = createOllamaAdapter(source, {
 `/v1/chat/completions` only honors `reasoning_effort`, and `/v1/messages`
 only honors the Anthropic `thinking` switch (both ignore `think`), so an
 effort level cannot be expressed on the messages factory. `true` sends
-Ollama's own default effort, `medium`. The configured value wins over a
-per-call thinking option, except that a per-call `budgetTokens` is kept:
+Ollama's own default effort, `medium`. On the messages factory,
+`reasoning: false` always disables thinking; otherwise a per-call thinking
+option is sent as requested:
 
 | `reasoning`                               | `createOllamaAdapter` sends  | `createOllamaAnthropicAdapter` sends                 |
 | ----------------------------------------- | ---------------------------- | ---------------------------------------------------- |
