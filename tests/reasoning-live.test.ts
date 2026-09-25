@@ -6,8 +6,11 @@ import { describe, expect, test } from "bun:test";
 import type { AdapterFactory, BuiltRequest } from "@intx/inference";
 import type { ConversationTurn, LastCycleSource } from "@intx/types/runtime";
 
-import { createOllamaAdapter, createOllamaAnthropicAdapter } from "./adapter";
-import type { Reasoning } from "./overrides";
+import {
+  createOllamaAdapter,
+  createOllamaAnthropicAdapter,
+} from "../src/adapter";
+import type { Reasoning } from "../src/overrides";
 
 const OLLAMA_ROOT_URL = process.env["OLLAMA_BASE_URL"] ?? "";
 const OLLAMA_V1_BASE_URL = `${OLLAMA_ROOT_URL}/v1`;
