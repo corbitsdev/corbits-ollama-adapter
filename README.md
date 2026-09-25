@@ -4,15 +4,12 @@ Interchange inference adapters for Ollama's two first-class HTTP surfaces. `crea
 
 ## Runtime support
 
-Bun >= 1.2 is the engines floor. The packed tarball ships compiled `dist/` (js + d.ts) built by `bun run build` (also wired as `prepack`); both Bun and native Node resolve the package through `dist` (`main`/`types` plus the `.` export's `default`/`types` conditions). Peers: `@intx/inference` and `@intx/types` (>= 0.3.0).
+Bun >= 1.2 or Node >= 24. Peers: `@intx/inference` and `@intx/types` (>= 0.4.0).
 
 ## Quickstart
 
 ```bash
 npm add @corbits/ollama-adapter
-pnpm add @corbits/ollama-adapter
-yarn add @corbits/ollama-adapter
-bun add @corbits/ollama-adapter
 ```
 
 A host never calls this package's factories directly. It installs the
@@ -22,15 +19,16 @@ sidecar's `SIDECAR_ADAPTER_MANIFEST` env var — a JSON array of
 with `import()` at boot:
 
 ```sh
-SIDECAR_ADAPTER_MANIFEST=[{"provider":"ollama","specifier":"@corbits/ollama-adapter","export":"createOllamaAdapter"}]
+SIDECAR_ADAPTER_MANIFEST='[{"provider":"ollama","specifier":"@corbits/ollama-adapter","export":"createOllamaAdapter"}]'
 ```
 
 Use `"createOllamaAnthropicAdapter"` instead for the Anthropic surface. The
 Anthropic factory parses the same quirks bag so a shared sidecar config does
-not fail validation, then ignores the values — `/v1/messages` has no
-num_ctx / think overlay. A hub that spawns sidecars (e.g. Workbench's process
-provisioner) forwards its own `SIDECAR_ADAPTER_MANIFEST` to every sidecar it
-starts, so this is one setting at the hub, not per-sidecar config.
+not fail validation, then ignores it: `numCtx`, `maxOutputTokens`,
+`reasoningEffort`, and `think` overrides are not applied to the `/v1/messages`
+body. A hub that spawns sidecars forwards its own
+`SIDECAR_ADAPTER_MANIFEST` to every sidecar it starts, so this is one setting
+at the hub, not per-sidecar config.
 
 Point the connected source's `baseURL` at local `http://localhost:11434/v1`
 or Cloud `https://ollama.com/v1`: the host concatenates `baseURL + path`, so
@@ -65,10 +63,6 @@ export const adapter = createOllamaAdapter(source, {
 });
 ```
 
-## How it works
-
-`createOllamaAdapter` reuses Interchange's built-in OpenAI Chat Completions adapter, then overlays `options.num_ctx`, max-tokens, `reasoning_effort`, and `think`, and repairs think-tags / inline tool JSON that Ollama emits on `/v1/chat/completions`. `createOllamaAnthropicAdapter` wraps the stock Anthropic adapter, rewrites the path to `/messages`, and swaps `x-api-key` for the bearer credential sentinel. Ollama's Anthropic surface already emits native `thinking` and `tool_use` blocks, so that path does no think-tag stripping or JSON salvage.
-
 ## Development
 
 ```sh
@@ -82,7 +76,7 @@ bun run test
 bun run check          # typecheck + lint + format:check + test
 ```
 
-`src/anthropic-ollama.spike.test.ts` drives `createOllamaAnthropicAdapter` against a local Ollama and skips when the daemon, model, or `/v1/messages` is missing.
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for packaging and internals.
 
 ## License
 
