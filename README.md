@@ -1,114 +1,128 @@
 # @corbits/ollama-adapter
 
-Interchange inference adapters for Ollama's two first-class HTTP surfaces. `createOllamaAdapter` wraps OpenAI-compat `POST /v1/chat/completions`; `createOllamaAnthropicAdapter` wraps Anthropic `POST /v1/messages`. Each surface keeps its native shape.
+`@intx/inference` provider adapters for Ollama's OpenAI-compatible `/v1/chat/completions` and Anthropic-compatible `/v1/messages` surfaces. A Corbits inference provider that plugs into the Interchange adapter registry and also works in any host that runs `@intx/inference`.
 
-## Runtime support
+## Why @corbits/ollama-adapter?
 
-Bun >= 1.2 or Node >= 24. Peers: `@intx/inference`, `@intx/log`, and `@intx/types` (^0.4.0).
+1. **Clean streams from local models.** Many Ollama models emit chain-of-thought inside `<think>` tags or tool calls as raw JSON in the text. `createOllamaAdapter` reclassifies both into thinking and tool-call events before they reach the agent.
+2. **One reasoning setting for both surfaces.** `reasoning` is sent as `reasoning_effort` on `/v1/chat/completions` and as the Anthropic `thinking` switch on `/v1/messages`, set per model or as a default.
+3. **Local or Ollama Cloud.** Point the same source at a local `ollama serve` or at Ollama Cloud. Both surfaces keep their native request shape and use `Authorization: Bearer`.
+
+It does not cover Ollama's native `/api` endpoints.
+
+## Install
+
+```bash
+bun add @corbits/ollama-adapter @intx/inference@^0.4.0 @intx/log@^0.4.0 @intx/types@^0.4.0
+```
+
+Runs on Bun >= 1.2 or Node >= 24.
 
 ## Quickstart
 
-```bash
-npm add @corbits/ollama-adapter
-```
-
-A host never calls this package's factories directly. It installs the
-package in the sidecar's workspace, then registers a provider id on the
-sidecar's `SIDECAR_ADAPTER_MANIFEST` env var — a JSON array of
-`{ provider, specifier, export }` entries the sidecar validates and loads
-with `import()` at boot:
-
-```sh
-SIDECAR_ADAPTER_MANIFEST='[{"provider":"ollama","specifier":"@corbits/ollama-adapter","export":"createOllamaAdapter"}]'
-```
-
-Use `"createOllamaAnthropicAdapter"` instead for the Anthropic surface. The
-Anthropic factory parses the same quirks bag so a shared sidecar config does
-not fail validation, then applies only `reasoning`:
-`maxOutputTokens` is not applied to the `/v1/messages` body. A hub that
-spawns sidecars forwards its own `SIDECAR_ADAPTER_MANIFEST` to every sidecar
-it starts, so this is one setting at the hub, not per-sidecar config.
-
-Point the connected source's `baseURL` at local `http://localhost:11434/v1`
-or Cloud `https://ollama.com/v1`: the host concatenates `baseURL + path`, so
-the factories emit `/chat/completions` and `/messages` (not `/v1/messages`),
-and both send `Authorization: Bearer`. The native `https://ollama.com/api/`
-surface uses different paths. Send images as base64 on both factories. Cloud
-models are the catalog at
-[ollama.com/search?c=cloud](https://ollama.com/search?c=cloud), not whatever
-is pulled locally — this package leaves source selection and pricing to your
-Ollama account.
-
-## Context length
-
-Ollama ignores `num_ctx` on its `/v1` surfaces, so neither factory sends a
-context-window override. A `numCtx` key from an older config is dropped with
-a warning logged through `@intx/log`. Set it on the
-Ollama server instead, with `OLLAMA_CONTEXT_LENGTH=32768 ollama serve` or
-`PARAMETER num_ctx 32768` in the model's Modelfile.
-
-## Lower-level: calling a factory directly
-
-`SIDECAR_ADAPTER_MANIFEST` loading is just `import()` plus a call to the
-named export — a host that resolves its own adapters (no sidecar-manifest
-step) can call either factory directly with a source and, for
-`createOllamaAdapter`, an overrides bag:
+Needs a running Ollama with `gpt-oss:20b` pulled. A local server accepts any `OLLAMA_API_KEY`.
 
 ```ts
+import { createDependencies, runInference } from "@intx/inference";
 import { createOllamaAdapter } from "@corbits/ollama-adapter";
-import type { LastCycleSource } from "@intx/types/runtime";
 
-const source: LastCycleSource = {
-  sourceId: "ollama/local",
-  provider: "ollama",
-  model: "gpt-oss:20b",
-};
-
-export const adapter = createOllamaAdapter(source, {
-  default: { maxOutputTokens: 4096 },
-  perModel: { "gpt-oss:20b": { reasoning: "high" } },
+const deps = createDependencies({
+  has: (provider) => provider === "ollama",
+  resolve: (source, quirks) => createOllamaAdapter(source, quirks),
 });
+
+let seq = 0;
+for await (const event of runInference({
+  deps,
+  source: {
+    id: "ollama",
+    provider: "ollama",
+    baseURL: "http://localhost:11434/v1",
+    credentialId: "OLLAMA_API_KEY",
+    model: "gpt-oss:20b",
+    quirks: { default: { maxOutputTokens: 512, reasoning: "low" } },
+  },
+  turns: [
+    {
+      role: "user",
+      timestamp: Date.now(),
+      content: [{ type: "text", text: "Say hello." }],
+    },
+  ],
+  nextSeq: () => seq++,
+  readMaterial: (id) => {
+    const secret = process.env[id];
+    if (secret === undefined) throw new Error(`${id} is not set`);
+    return { secret };
+  },
+})) {
+  if (event.type === "inference.text.delta")
+    process.stdout.write(event.data.token);
+  if (event.type === "inference.error")
+    throw new Error(event.data.error.message);
+}
+process.stdout.write("\n");
 ```
 
-`reasoning` is one setting translated per factory. Ollama's
-`/v1/chat/completions` only honors `reasoning_effort`, and `/v1/messages`
-only honors the Anthropic `thinking` switch (both ignore `think`), so an
-effort level cannot be expressed on the messages factory. `true` sends
-Ollama's own default effort, `medium`. On the messages factory,
-`reasoning: false` always disables thinking; otherwise a per-call thinking
-option is sent as requested:
+## Where it fits
 
-| `reasoning`                               | `createOllamaAdapter` sends  | `createOllamaAnthropicAdapter` sends                 |
+[Interchange](https://github.com/faremeter/interchange) runs AI agents as principals (accounts that hold their own identity, permissions and credentials). Corbits packages add what an agent product needs around it.
+
+- **Runs in:** the agent sidecar (the runtime next to each agent), or any process that calls `runInference`. No hub (the multi-tenant control plane) is required.
+- **Plugs into:** the [`@intx/inference`](https://github.com/faremeter/interchange/tree/main/packages/inference) adapter registry, as the factory for an Ollama provider id.
+- **Pairs with:** [`@corbits/openai-responses`](https://github.com/corbitsdev/corbits-openai-responses) and [`@corbits/system-one`](https://github.com/corbitsdev/corbits-system-one), the other Corbits inference providers.
+
+## Reference
+
+| Export                         | Description                                                                           |
+| ------------------------------ | ------------------------------------------------------------------------------------- |
+| `createOllamaAdapter`          | `AdapterFactory` for `/v1/chat/completions`. Applies every config field.              |
+| `createOllamaAnthropicAdapter` | `AdapterFactory` for `/v1/messages`. Accepts the same config and applies `reasoning`. |
+| `OllamaAdapterConfig`          | Schema and type for the source's `quirks`: `{ default?, perModel? }` of overrides.    |
+| `OllamaAdapterOverride`        | Schema and type for one override. Unknown keys are rejected.                          |
+| `Reasoning`                    | Schema and type for `reasoning`: `boolean \| "low" \| "medium" \| "high" \| "max"`.   |
+
+Set the source's `baseURL` to `http://localhost:11434/v1` or `https://ollama.com/v1`. The factories append `/chat/completions` and `/messages`. Send images as base64.
+
+### Overrides
+
+A `perModel` entry wins field by field over `default`. An unset field leaves the request unchanged.
+
+| Field             | Type                | `createOllamaAdapter` sends | `createOllamaAnthropicAdapter` sends |
+| ----------------- | ------------------- | --------------------------- | ------------------------------------ |
+| `maxOutputTokens` | positive integer    | `max_tokens`                | nothing                              |
+| `reasoning`       | see the table below | `reasoning_effort`          | `thinking`                           |
+
+| `reasoning`                               | `createOllamaAdapter`        | `createOllamaAnthropicAdapter`                       |
 | ----------------------------------------- | ---------------------------- | ---------------------------------------------------- |
 | `false`                                   | `reasoning_effort: "none"`   | `thinking: { type: "disabled" }`                     |
 | `true`                                    | `reasoning_effort: "medium"` | `thinking: { type: "enabled", budget_tokens: 1024 }` |
 | `"low"` / `"medium"` / `"high"` / `"max"` | `reasoning_effort` as given  | `thinking: { type: "enabled", budget_tokens: 1024 }` |
-| unset                                     | nothing                      | nothing                                              |
 
-On the messages factory, a thinking `budget_tokens` at or above `max_tokens`
-throws at `buildRequest`.
+`/v1/messages` has no effort levels, so every level enables thinking with the same budget. On that factory, `reasoning: false` always disables thinking; otherwise a per-call thinking option wins. With `reasoning` set, a thinking `budget_tokens` at or above `max_tokens` throws at `buildRequest`.
 
-The pre-0.2.0 `think` and `reasoningEffort` keys still parse: each logs a
-warning and is read as `reasoning` (`think` first; an explicit `reasoning`
-wins).
+Ollama ignores `num_ctx` on `/v1`. Set the context length on the server with `OLLAMA_CONTEXT_LENGTH=32768 ollama serve`, or with `PARAMETER num_ctx 32768` in the model's Modelfile.
 
-## Development
+## Using with Interchange
 
-```sh
-git clone https://github.com/corbitsdev/corbits-ollama-adapter.git
-cd corbits-ollama-adapter
-bun install
-bun run typecheck
-bun run lint
-bun run format:check
-bun run test
-bun run check          # typecheck + lint + format:check + test
+The sidecar loads custom adapters from the `SIDECAR_ADAPTER_MANIFEST` env var, a JSON array of `{ provider, specifier, export }` entries. Install this package in the sidecar's workspace and register a provider id:
+
+```bash
+SIDECAR_ADAPTER_MANIFEST='[
+  {"provider":"ollama","specifier":"@corbits/ollama-adapter","export":"createOllamaAdapter"}
+]'
 ```
 
-`tests/live-ollama.test.ts` drives both factories against the Ollama at `OLLAMA_BASE_URL` (model `OLLAMA_MODEL`, default `gpt-oss:20b`) and skips when the variable is unset or the model or surface is missing. `tests/reasoning-live.test.ts` checks the `reasoning` field on both surfaces against the same server (model `OLLAMA_REASONING_MODEL`, default `qwen3:8b`).
+Use `createOllamaAnthropicAdapter` as the export for the `/v1/messages` surface. A hub that spawns sidecars forwards its own `SIDECAR_ADAPTER_MANIFEST` to each one, so set it once on the hub. Sources with that `provider` then resolve to this adapter, and each source's `quirks` holds its `OllamaAdapterConfig`.
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for packaging and internals.
+## Upgrading from 0.1
+
+- `reasoningEffort` and `think` are replaced by `reasoning`. Old configs still load: each key logs one warning and is read as `reasoning` (`think` first; an explicit `reasoning` wins).
+- `numCtx` is removed because Ollama ignores it on `/v1`. Old configs still load: the key logs one warning and is dropped. Set the context length on the server instead.
+- `createOllamaAnthropicAdapter` now applies `reasoning` and throws when the thinking budget is at or above `max_tokens`.
+- `parseOllamaAdapterConfig`, `resolveOverride` and the think-tag and inline-JSON helpers are no longer exported.
+- `@intx/log` is a new peer. All `@intx/*` peers are now `^0.4.0`, which excludes 0.5.
 
 ## License
 
-LGPL-2.1-only. See [LICENSE](./LICENSE).
+[LGPL-2.1-only](https://github.com/corbitsdev/corbits-ollama-adapter/blob/main/LICENSE)
