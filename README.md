@@ -4,7 +4,7 @@ Interchange inference adapters for Ollama's two first-class HTTP surfaces. `crea
 
 ## Runtime support
 
-Bun >= 1.2 is the engines floor and consumes TypeScript source directly. `engines` does not declare Node; native Node does not load this package's TypeScript source. Peers: `@intx/inference` and `@intx/types` (>= 0.3.0).
+Bun >= 1.2 is the engines floor. The packed tarball ships compiled `dist/` (js + d.ts) built by `bun run build` (also wired as `prepack`); both Bun and native Node resolve the package through `dist` (`main`/`types` plus the `.` export's `default`/`types` conditions). Peers: `@intx/inference` and `@intx/types` (>= 0.3.0).
 
 ## Quickstart
 

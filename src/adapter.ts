@@ -40,14 +40,17 @@ import {
   parseOllamaAdapterConfig,
   resolveOverride,
   type OllamaAdapterOverride,
-} from "./overrides";
-import { createThinkSplitState, reclassifyThinkingEvents } from "./think-tags";
+} from "./overrides.js";
+import {
+  createThinkSplitState,
+  reclassifyThinkingEvents,
+} from "./think-tags.js";
 import {
   createInlineToolJsonState,
   reclassifyInlineToolJsonEvents,
   responseChunkIsTerminal,
   setDeclaredToolNames,
-} from "./inline-tool-json";
+} from "./inline-tool-json.js";
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
