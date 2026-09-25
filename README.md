@@ -93,6 +93,8 @@ bun run test
 bun run check          # typecheck + lint + format:check + test
 ```
 
+`tests/live-ollama.test.ts` drives both factories against the Ollama at `OLLAMA_BASE_URL` (model `OLLAMA_MODEL`, default `gpt-oss:20b`) and skips when the variable is unset or the model or surface is missing.
+
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for packaging and internals.
 
 ## License
