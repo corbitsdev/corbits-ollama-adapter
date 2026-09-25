@@ -4,7 +4,7 @@ Interchange inference adapters for Ollama's two first-class HTTP surfaces. `crea
 
 ## Runtime support
 
-Bun >= 1.2 or Node >= 24. Peers: `@intx/inference` and `@intx/types` (^0.4.0).
+Bun >= 1.2 or Node >= 24. Peers: `@intx/inference`, `@intx/log`, and `@intx/types` (^0.4.0).
 
 ## Quickstart
 
@@ -24,8 +24,8 @@ SIDECAR_ADAPTER_MANIFEST='[{"provider":"ollama","specifier":"@corbits/ollama-ada
 
 Use `"createOllamaAnthropicAdapter"` instead for the Anthropic surface. The
 Anthropic factory parses the same quirks bag so a shared sidecar config does
-not fail validation, then applies only `reasoning`: `numCtx` and
-`maxOutputTokens` are not applied to the `/v1/messages` body. A hub that
+not fail validation, then applies only `reasoning`:
+`maxOutputTokens` is not applied to the `/v1/messages` body. A hub that
 spawns sidecars forwards its own `SIDECAR_ADAPTER_MANIFEST` to every sidecar
 it starts, so this is one setting at the hub, not per-sidecar config.
 
@@ -38,6 +38,14 @@ models are the catalog at
 [ollama.com/search?c=cloud](https://ollama.com/search?c=cloud), not whatever
 is pulled locally — this package leaves source selection and pricing to your
 Ollama account.
+
+## Context length
+
+Ollama ignores `num_ctx` on its `/v1` surfaces, so neither factory sends a
+context-window override. A `numCtx` key from an older config is dropped with
+a warning logged through `@intx/log`. Set it on the
+Ollama server instead, with `OLLAMA_CONTEXT_LENGTH=32768 ollama serve` or
+`PARAMETER num_ctx 32768` in the model's Modelfile.
 
 ## Lower-level: calling a factory directly
 
@@ -57,7 +65,7 @@ const source: LastCycleSource = {
 };
 
 export const adapter = createOllamaAdapter(source, {
-  default: { numCtx: 8192, maxOutputTokens: 4096 },
+  default: { maxOutputTokens: 4096 },
   perModel: { "gpt-oss:20b": { reasoning: "high" } },
 });
 ```
@@ -79,6 +87,10 @@ option is sent as requested:
 
 On the messages factory, a thinking `budget_tokens` at or above `max_tokens`
 throws at `buildRequest`.
+
+The pre-0.2.0 `think` and `reasoningEffort` keys still parse: each logs a
+warning and is read as `reasoning` (`think` first; an explicit `reasoning`
+wins).
 
 ## Development
 

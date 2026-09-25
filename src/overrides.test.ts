@@ -14,24 +14,29 @@ describe("parseOllamaAdapterConfig", () => {
     expect(() => parseOllamaAdapterConfig({ bogus: true })).toThrow();
   });
 
-  test("rejects a non-positive numCtx", () => {
-    expect(() =>
-      parseOllamaAdapterConfig({ default: { numCtx: 0 } }),
-    ).toThrow();
-  });
-
-  test("rejects the removed reasoningEffort and think fields", () => {
-    expect(() =>
-      parseOllamaAdapterConfig({ default: { reasoningEffort: "high" } }),
-    ).toThrow();
-    expect(() =>
-      parseOllamaAdapterConfig({ default: { think: true } }),
-    ).toThrow();
+  test("maps the pre-0.2.0 think and reasoningEffort keys to reasoning", () => {
+    expect(
+      parseOllamaAdapterConfig({
+        default: { reasoningEffort: "high" },
+        perModel: {
+          a: { think: false },
+          b: { think: "low", reasoningEffort: "high" },
+          c: { think: true, reasoning: "max" },
+        },
+      }),
+    ).toEqual({
+      default: { reasoning: "high" },
+      perModel: {
+        a: { reasoning: false },
+        b: { reasoning: "low" },
+        c: { reasoning: "max" },
+      },
+    });
   });
 
   test("accepts a well-formed default and perModel config", () => {
     const parsed = OllamaAdapterConfig({
-      default: { numCtx: 8192 },
+      default: { maxOutputTokens: 1024 },
       perModel: { "gpt-oss:20b": { maxOutputTokens: 2048 } },
     });
     expect(parsed instanceof Error).toBe(false);
@@ -44,22 +49,26 @@ describe("resolveOverride", () => {
   });
 
   test("the general default applies when no per-model entry matches", () => {
-    const config = parseOllamaAdapterConfig({ default: { numCtx: 8192 } });
-    expect(resolveOverride(config, "qwen3.8:27b")).toEqual({ numCtx: 8192 });
+    const config = parseOllamaAdapterConfig({
+      default: { maxOutputTokens: 1024 },
+    });
+    expect(resolveOverride(config, "qwen3.8:27b")).toEqual({
+      maxOutputTokens: 1024,
+    });
   });
 
   test("a per-model override beats the general default field-by-field", () => {
     const config = parseOllamaAdapterConfig({
-      default: { numCtx: 8192, maxOutputTokens: 1024 },
-      perModel: { "gpt-oss:20b": { numCtx: 32768 } },
+      default: { maxOutputTokens: 1024, reasoning: "low" },
+      perModel: { "gpt-oss:20b": { reasoning: "high" } },
     });
     expect(resolveOverride(config, "gpt-oss:20b")).toEqual({
-      numCtx: 32768,
       maxOutputTokens: 1024,
+      reasoning: "high",
     });
     expect(resolveOverride(config, "qwen3.8:27b")).toEqual({
-      numCtx: 8192,
       maxOutputTokens: 1024,
+      reasoning: "low",
     });
   });
 });
