@@ -16,9 +16,9 @@
 // endpoint's `options` passthrough object as `options.num_ctx`, exactly
 // like a native `/api/chat` call. A silently-dropped `num_ctx` (set on the
 // wrong field, or as a top-level key the endpoint ignores) is the failure
-// mode this adapter exists to rule out. Reasoning effort rides through the
-// same `reasoning_effort` field Ollama already recognizes for gpt-oss
-// models on this endpoint.
+// mode this adapter exists to rule out. The `reasoning` override rides
+// through `reasoning_effort`, the only reasoning field this endpoint honors
+// (it ignores `think`).
 import {
   BEARER_CREDENTIAL_SENTINEL,
   type AdapterFactory,
@@ -40,6 +40,7 @@ import {
   parseOllamaAdapterConfig,
   resolveOverride,
   type OllamaAdapterOverride,
+  type Reasoning,
 } from "./overrides.js";
 import {
   createThinkSplitState,
@@ -97,6 +98,26 @@ function rejectNonBase64Images(messages: readonly ConversationTurn[]): void {
   }
 }
 
+function reasoningEffortOf(reasoning: Reasoning): string {
+  if (reasoning === true) return "medium";
+  if (reasoning === false) return "none";
+  return reasoning;
+}
+
+const ANTHROPIC_THINKING_BUDGET_TOKENS = 1024;
+
+// Ollama's `/v1/messages` ignores `think` and honors only the Anthropic
+// `thinking` on/off switch; an effort level cannot be expressed there. A
+// `thinking` block the caller already requested keeps its own budget.
+function anthropicThinkingOf(
+  reasoning: Reasoning,
+  requested: unknown,
+): unknown {
+  if (reasoning === false) return { type: "disabled" };
+  if (requested !== undefined) return requested;
+  return { type: "enabled", budget_tokens: ANTHROPIC_THINKING_BUDGET_TOKENS };
+}
+
 function applyOverride(
   built: BuiltRequest,
   override: OllamaAdapterOverride,
@@ -120,11 +141,8 @@ function applyOverride(
       body["max_tokens"] = override.maxOutputTokens;
     }
   }
-  if (override.reasoningEffort !== undefined) {
-    body["reasoning_effort"] = override.reasoningEffort;
-  }
-  if (override.think !== undefined) {
-    body["think"] = override.think;
+  if (override.reasoning !== undefined) {
+    body["reasoning_effort"] = reasoningEffortOf(override.reasoning);
   }
   return { ...built, body: JSON.stringify(body) };
 }
@@ -270,9 +288,8 @@ export const createOllamaAdapter: AdapterFactory = (
  * inline-tool-JSON salvage, or `num_ctx` overlay — that surface has no
  * context-window field. Non-base64 images are rejected the same way as
  * on the OpenAI-compat factory; Ollama's Anthropic surface only accepts
- * base64 image content. `quirks` is still parsed as
- * {@link OllamaAdapterConfig} so a shared sidecar bag does not 400 the
- * stock Anthropic quirks validator; the values are unused on this path.
+ * base64 image content. `quirks` is parsed as {@link OllamaAdapterConfig};
+ * only `reasoning` applies on this path, as the Anthropic `thinking` field.
  *
  * Local and Cloud sources already use a `/v1` base
  * (`http://localhost:11434/v1`, `https://ollama.com/v1`). The harness
@@ -287,7 +304,7 @@ export const createOllamaAnthropicAdapter: AdapterFactory = (
   source: LastCycleSource,
   quirks?: unknown,
 ): ProviderAdapter => {
-  parseOllamaAdapterConfig(quirks);
+  const config = parseOllamaAdapterConfig(quirks);
   const inner = createAnthropicAdapter(source);
   return {
     ...inner,
@@ -295,16 +312,28 @@ export const createOllamaAnthropicAdapter: AdapterFactory = (
       rejectNonBase64Images(messages);
       return withOllamaAnthropicWire(
         inner.buildRequest(messages, model, options),
+        resolveOverride(config, model),
       );
     },
   };
 };
 
-function withOllamaAnthropicWire(built: BuiltRequest): BuiltRequest {
+function withOllamaAnthropicWire(
+  built: BuiltRequest,
+  override: OllamaAdapterOverride,
+): BuiltRequest {
   const { ["x-api-key"]: _dropped, ...headers } = built.headers;
+  const body = parseJsonObject(built.body);
+  if (override.reasoning !== undefined) {
+    body["thinking"] = anthropicThinkingOf(
+      override.reasoning,
+      body["thinking"],
+    );
+  }
   return {
     ...built,
     url: "/messages",
+    body: JSON.stringify(body),
     headers: {
       ...headers,
       authorization: BEARER_CREDENTIAL_SENTINEL,

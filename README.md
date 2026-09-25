@@ -24,11 +24,10 @@ SIDECAR_ADAPTER_MANIFEST='[{"provider":"ollama","specifier":"@corbits/ollama-ada
 
 Use `"createOllamaAnthropicAdapter"` instead for the Anthropic surface. The
 Anthropic factory parses the same quirks bag so a shared sidecar config does
-not fail validation, then ignores it: `numCtx`, `maxOutputTokens`,
-`reasoningEffort`, and `think` overrides are not applied to the `/v1/messages`
-body. A hub that spawns sidecars forwards its own
-`SIDECAR_ADAPTER_MANIFEST` to every sidecar it starts, so this is one setting
-at the hub, not per-sidecar config.
+not fail validation, then applies only `reasoning`: `numCtx` and
+`maxOutputTokens` are not applied to the `/v1/messages` body. A hub that
+spawns sidecars forwards its own `SIDECAR_ADAPTER_MANIFEST` to every sidecar
+it starts, so this is one setting at the hub, not per-sidecar config.
 
 Point the connected source's `baseURL` at local `http://localhost:11434/v1`
 or Cloud `https://ollama.com/v1`: the host concatenates `baseURL + path`, so
@@ -59,9 +58,23 @@ const source: LastCycleSource = {
 
 export const adapter = createOllamaAdapter(source, {
   default: { numCtx: 8192, maxOutputTokens: 4096 },
-  perModel: { "gpt-oss:20b": { reasoningEffort: "high" } },
+  perModel: { "gpt-oss:20b": { reasoning: "high" } },
 });
 ```
+
+`reasoning` is one setting translated per factory. Ollama's
+`/v1/chat/completions` only honors `reasoning_effort`, and `/v1/messages`
+only honors the Anthropic `thinking` switch (both ignore `think`), so an
+effort level cannot be expressed on the messages factory. `true` sends
+Ollama's own default effort, `medium`. The configured value wins over a
+per-call thinking option, except that a per-call `budgetTokens` is kept:
+
+| `reasoning`                               | `createOllamaAdapter` sends  | `createOllamaAnthropicAdapter` sends                 |
+| ----------------------------------------- | ---------------------------- | ---------------------------------------------------- |
+| `false`                                   | `reasoning_effort: "none"`   | `thinking: { type: "disabled" }`                     |
+| `true`                                    | `reasoning_effort: "medium"` | `thinking: { type: "enabled", budget_tokens: 1024 }` |
+| `"low"` / `"medium"` / `"high"` / `"max"` | `reasoning_effort` as given  | `thinking: { type: "enabled", budget_tokens: 1024 }` |
+| unset                                     | nothing                      | nothing                                              |
 
 ## Development
 
