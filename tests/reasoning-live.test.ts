@@ -80,3 +80,29 @@ describe.skipIf(!reachable)(`reasoning against Ollama ${MODEL}`, () => {
     );
   }, 120000);
 });
+
+// A 0.1 `think` was inert on /v1; it must stay inert rather than send
+// reasoning_effort, which Ollama rejects for non-thinking models.
+const LEGACY_MODEL = process.env["OLLAMA_NON_THINKING_MODEL"] ?? "llama3.2:1b";
+
+describe.skipIf(!(await modelIsPulled(LEGACY_MODEL)))(
+  `legacy think against Ollama ${LEGACY_MODEL}`,
+  () => {
+    test("a 0.1 think config still completes", async () => {
+      const adapter = createOllamaAdapter(
+        { ...source, model: LEGACY_MODEL },
+        { default: { think: true } },
+      );
+      const built = adapter.buildRequest(messages, LEGACY_MODEL, {
+        maxTokens: 16,
+      });
+      const res = await fetch(`${OLLAMA_V1_BASE_URL}${built.url}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: built.body,
+      });
+      expect(res.status).toBe(200);
+      await res.text();
+    }, 120000);
+  },
+);
