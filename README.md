@@ -4,7 +4,7 @@ Interchange inference adapters for Ollama's two first-class HTTP surfaces. `crea
 
 ## Runtime support
 
-Bun >= 1.2 or Node >= 24. Peers: `@intx/inference` and `@intx/types` (>= 0.4.0).
+Bun >= 1.2 or Node >= 24. Peers: `@intx/inference` and `@intx/types` (^0.4.0).
 
 ## Quickstart
 
