@@ -13,10 +13,8 @@ import {
   createOllamaAdapter,
   createOllamaAnthropicAdapter,
 } from "../src/adapter";
+import { OLLAMA_V1_BASE_URL, modelIsPulled } from "./ollama-server";
 
-// Opt-in: skipped unless OLLAMA_BASE_URL names the server (e.g. http://host:11434).
-const OLLAMA_ROOT_URL = process.env["OLLAMA_BASE_URL"] ?? "";
-const OLLAMA_V1_BASE_URL = `${OLLAMA_ROOT_URL}/v1`;
 const MODEL = process.env["OLLAMA_MODEL"] ?? "gpt-oss:20b";
 const TIMEOUT_MS = 120000;
 const MAX_TOKENS = 2048;
@@ -30,32 +28,6 @@ const weatherTool: ToolDefinition = {
     required: ["city"],
   },
 };
-
-async function modelIsPulled(): Promise<boolean> {
-  try {
-    const res = await fetch(`${OLLAMA_ROOT_URL}/api/tags`, {
-      signal: AbortSignal.timeout(1000),
-    });
-    if (!res.ok) return false;
-    const body: unknown = await res.json();
-    if (typeof body !== "object" || body === null || !("models" in body)) {
-      return false;
-    }
-    const models: unknown = body.models;
-    return (
-      Array.isArray(models) &&
-      models.some(
-        (entry: unknown) =>
-          typeof entry === "object" &&
-          entry !== null &&
-          "name" in entry &&
-          entry.name === MODEL,
-      )
-    );
-  } catch {
-    return false;
-  }
-}
 
 // An empty POST 400s on a present surface and 404s on a missing one
 // without starting generation.
@@ -74,7 +46,7 @@ async function surfaceExists(path: string): Promise<boolean> {
   }
 }
 
-const pulled = OLLAMA_ROOT_URL !== "" && (await modelIsPulled());
+const pulled = await modelIsPulled(MODEL);
 
 function turn(text: string): ConversationTurn {
   return { role: "user", timestamp: 0, content: [{ type: "text", text }] };

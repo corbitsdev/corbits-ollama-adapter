@@ -11,9 +11,8 @@ import {
   createOllamaAnthropicAdapter,
 } from "../src/adapter";
 import type { Reasoning } from "../src/overrides";
+import { OLLAMA_V1_BASE_URL, modelIsPulled } from "./ollama-server";
 
-const OLLAMA_ROOT_URL = process.env["OLLAMA_BASE_URL"] ?? "";
-const OLLAMA_V1_BASE_URL = `${OLLAMA_ROOT_URL}/v1`;
 const MODEL = process.env["OLLAMA_REASONING_MODEL"] ?? "qwen3:8b";
 
 const source: LastCycleSource = {
@@ -26,19 +25,7 @@ const messages: ConversationTurn[] = [
   { role: "user", timestamp: 0, content: [{ type: "text", text: "2+2?" }] },
 ];
 
-async function modelAvailable(): Promise<boolean> {
-  try {
-    const res = await fetch(`${OLLAMA_ROOT_URL}/api/tags`, {
-      signal: AbortSignal.timeout(1000),
-    });
-    if (!res.ok) return false;
-    return JSON.stringify(await res.json()).includes(`"name":"${MODEL}"`);
-  } catch {
-    return false;
-  }
-}
-
-const reachable = OLLAMA_ROOT_URL !== "" && (await modelAvailable());
+const reachable = await modelIsPulled(MODEL);
 // gpt-oss only has low/medium/high effort; it cannot turn reasoning off.
 const canDisableReasoning = !MODEL.startsWith("gpt-oss");
 
