@@ -102,7 +102,7 @@ function migrateLegacyKeys(raw: unknown): unknown {
   for (const key of seen) {
     if (warned.has(key)) continue;
     warned.add(key);
-    logger.warn`${legacyWarnings[key]}`;
+    logger.warn(legacyWarnings[key]);
   }
   return migrated;
 }
