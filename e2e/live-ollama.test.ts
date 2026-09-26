@@ -13,7 +13,7 @@ import {
   createOllamaAdapter,
   createOllamaAnthropicAdapter,
 } from "../src/adapter";
-import { OLLAMA_V1_BASE_URL, modelIsPulled } from "./ollama-server";
+import { OLLAMA_V1_BASE_URL, modelIsPulled } from "./helpers";
 
 const MODEL = process.env["OLLAMA_MODEL"] ?? "gpt-oss:20b";
 const TIMEOUT_MS = 120000;

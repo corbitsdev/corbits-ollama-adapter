@@ -18,52 +18,6 @@ bun add @corbits/ollama-adapter @intx/inference@^0.4.0 @intx/log@^0.4.0 @intx/ty
 
 Runs on Bun >= 1.2 or Node >= 24.
 
-## Quickstart
-
-Needs a running Ollama with `gpt-oss:20b` pulled. A local server accepts any `OLLAMA_API_KEY`.
-
-```ts
-import { createDependencies, runInference } from "@intx/inference";
-import { createOllamaAdapter } from "@corbits/ollama-adapter";
-
-const deps = createDependencies({
-  has: (provider) => provider === "ollama",
-  resolve: (source, quirks) => createOllamaAdapter(source, quirks),
-});
-
-let seq = 0;
-for await (const event of runInference({
-  deps,
-  source: {
-    id: "ollama",
-    provider: "ollama",
-    baseURL: "http://localhost:11434/v1",
-    credentialId: "OLLAMA_API_KEY",
-    model: "gpt-oss:20b",
-    quirks: { default: { maxOutputTokens: 512, reasoning: "low" } },
-  },
-  turns: [
-    {
-      role: "user",
-      timestamp: Date.now(),
-      content: [{ type: "text", text: "Say hello." }],
-    },
-  ],
-  nextSeq: () => seq++,
-  readMaterial: (id) => {
-    const secret = process.env[id];
-    if (secret === undefined) throw new Error(`${id} is not set`);
-    return { secret };
-  },
-})) {
-  if (event.type === "inference.text.delta")
-    process.stdout.write(event.data.token);
-  if (event.type === "inference.error")
-    throw new Error(event.data.error.message);
-}
-process.stdout.write("\n");
-```
-
 ## Where it fits
 
 [Interchange](https://github.com/faremeter/interchange) runs AI agents as principals (accounts that hold their own identity, permissions and credentials). Corbits packages add what an agent product needs around it.

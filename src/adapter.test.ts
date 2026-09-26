@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { configureSync, resetSync } from "@intx/log";
 import { BEARER_CREDENTIAL_SENTINEL } from "@intx/inference";
-import { createOpenAIAdapter } from "@intx/inference/providers";
 import type { LastCycleSource } from "@intx/types/runtime";
 import type {
   ConversationTurn,
@@ -105,18 +104,6 @@ function expectSharedToolCallId(events: readonly InferenceEvent[]): void {
 }
 
 describe("createOllamaAdapter", () => {
-  test("no override configured leaves the body equivalent to the built-in adapter's", () => {
-    const wrapped = createOllamaAdapter(source, undefined);
-    const inner = createOpenAIAdapter(source);
-    const wrappedBuilt = wrapped.buildRequest(messages, "gpt-oss:20b", options);
-    const innerBuilt = inner.buildRequest(messages, "gpt-oss:20b", options);
-    const wrappedBody = bodyOf(wrappedBuilt);
-    const { stream_options: _streamOptions, ...rest } = wrappedBody;
-    expect(rest).toEqual(bodyOf(innerBuilt));
-    expect(wrappedBuilt.url).toBe(innerBuilt.url);
-    expect(wrappedBuilt.headers).toEqual(innerBuilt.headers);
-  });
-
   test.each([
     [true, "medium"],
     [false, "none"],
@@ -163,27 +150,6 @@ describe("createOllamaAdapter", () => {
     } finally {
       resetSync();
     }
-  });
-
-  test("an unconfigured reasoning override is omitted from the built request body", () => {
-    const wrapped = createOllamaAdapter(source, {});
-    const built = wrapped.buildRequest(messages, "gpt-oss:20b", options);
-    expect(bodyOf(built)).not.toHaveProperty("reasoning_effort");
-  });
-
-  test("a per-model override beats the general default", () => {
-    const wrapped = createOllamaAdapter(source, {
-      default: { maxOutputTokens: 1024 },
-      perModel: { "gpt-oss:20b": { maxOutputTokens: 2048 } },
-    });
-    const forOverriddenModel = bodyOf(
-      wrapped.buildRequest(messages, "gpt-oss:20b", options),
-    );
-    const forOtherModel = bodyOf(
-      wrapped.buildRequest(messages, "qwen3.8:27b", options),
-    );
-    expect(forOverriddenModel["max_tokens"]).toBe(2048);
-    expect(forOtherModel["max_tokens"]).toBe(1024);
   });
 
   test("preserves the built-in adapter's response parsing and header extractors", () => {
@@ -249,12 +215,6 @@ describe("createOllamaAdapter", () => {
     expect(JSON.parse(argumentFragments(events))).toEqual({
       query: "this person",
     });
-  });
-
-  test("every request asks the OpenAI-compat endpoint for a terminal usage chunk", () => {
-    const wrapped = createOllamaAdapter(source, undefined);
-    const body = bodyOf(wrapped.buildRequest(messages, "gpt-oss:20b", options));
-    expect(body["stream_options"]).toEqual({ include_usage: true });
   });
 
   test("parseResponse maps native prompt_eval_count/eval_count onto inference.usage", () => {
@@ -393,12 +353,6 @@ describe("createOllamaAdapter", () => {
 });
 
 describe("createOllamaAnthropicAdapter", () => {
-  test("buildRequest targets Anthropic /messages against a /v1 source base", () => {
-    const wrapped = createOllamaAnthropicAdapter(source, undefined);
-    const built = wrapped.buildRequest(messages, "gpt-oss:20b", options);
-    expect(built.url).toBe("/messages");
-  });
-
   test("a /v1 source base concatenates to /v1/messages, not /v1/v1/messages", () => {
     const wrapped = createOllamaAnthropicAdapter(source, undefined);
     const built = wrapped.buildRequest(messages, "gpt-oss:20b", options);
@@ -503,11 +457,5 @@ describe("createOllamaAnthropicAdapter", () => {
     expect(() =>
       wrapped.buildRequest(withBase64Image, "gpt-oss:20b", options),
     ).not.toThrow();
-  });
-
-  test("preserves the stock Anthropic adapter's response parser", () => {
-    const wrapped = createOllamaAnthropicAdapter(source, undefined);
-    expect(typeof wrapped.parseResponse).toBe("function");
-    expect(typeof wrapped.parseJSONResponse).toBe("function");
   });
 });

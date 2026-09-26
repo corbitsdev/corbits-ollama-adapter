@@ -11,7 +11,7 @@ import {
   createOllamaAnthropicAdapter,
 } from "../src/adapter";
 import type { Reasoning } from "../src/overrides";
-import { OLLAMA_V1_BASE_URL, modelIsPulled } from "./ollama-server";
+import { OLLAMA_V1_BASE_URL, modelIsPulled } from "./helpers";
 
 const MODEL = process.env["OLLAMA_REASONING_MODEL"] ?? "qwen3:8b";
 
