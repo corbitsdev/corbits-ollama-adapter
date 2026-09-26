@@ -5,6 +5,5 @@ export {
 export {
   OllamaAdapterConfig,
   OllamaAdapterOverride,
-  ReasoningEffort,
-  Think,
+  Reasoning,
 } from "./overrides.js";

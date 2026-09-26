@@ -1,8 +1,8 @@
 // Some Ollama models populate the `reasoning`/`reasoning_content` delta
 // fields `@intx/inference`'s OpenAI provider already classifies as
 // `inference.thinking.delta` (see `providers/openai.js`'s
-// `reasoningFieldNames` handling) — typically when `think` is set on the
-// request. Other models still emit chain-of-thought inline in `content`,
+// `reasoningFieldNames` handling) — typically when `reasoning` is set on the
+// adapter. Other models still emit chain-of-thought inline in `content`,
 // wrapped in `<think>…</think>`. Left alone, that tagged text is
 // indistinguishable from the reply and rides every hop downstream as a
 // genuine `inference.text.delta` leak. This module reclassifies inline
@@ -31,12 +31,12 @@ export type ThinkSplitState = {
   /** Set once the built-in OpenAI adapter has already emitted a native
    * `inference.thinking.delta` for this response (it reads `reasoning`/
    * `reasoning_content` fields itself — see `providers/openai.js`'s
-   * `reasoningFieldNames` handling). A model given a `think` override
-   * (see overrides.ts) returns its reasoning that way, with no `<think>`
+   * `reasoningFieldNames` handling). A model given a `reasoning` override
+   * returns its reasoning that way, with no `<think>`
    * tags anywhere in `content`; regex-splitting `content` on top of an
    * already-classified native thinking stream is unnecessary and risks
    * misfiring on a coincidental literal "<think>" in ordinary text. The
-   * tag splitter still runs as-is for a model that ignores `think` and
+   * tag splitter still runs as-is for a model that ignores `reasoning_effort` and
    * falls back to inline tags. If a tag span was already open when native
    * thinking arrives, it is abandoned so later answer text is not
    * swallowed as thinking while waiting for `</think>`; leftover close
