@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { configureSync, resetSync } from "@intx/log";
 import { BEARER_CREDENTIAL_SENTINEL } from "@intx/inference";
 import { createOpenAIAdapter } from "@intx/inference/providers";
 import type { LastCycleSource } from "@intx/types/runtime";
@@ -132,6 +133,38 @@ describe("createOllamaAdapter", () => {
     },
   );
 
+  test("a legacy numCtx warns once per process and is not sent", () => {
+    const records: { level: string; message: readonly unknown[] }[] = [];
+    configureSync({
+      reset: true,
+      sinks: { capture: (record) => records.push(record) },
+      loggers: [
+        { category: ["corbits"], sinks: ["capture"] },
+        { category: ["logtape", "meta"], lowestLevel: "warning", sinks: [] },
+      ],
+    });
+    try {
+      const config = {
+        default: { numCtx: 8192 },
+        perModel: { "gpt-oss:20b": { numCtx: 65536, maxOutputTokens: 64 } },
+      };
+      createOllamaAdapter(source, config);
+      const wrapped = createOllamaAdapter(source, config);
+      const body = bodyOf(
+        wrapped.buildRequest(messages, "gpt-oss:20b", options),
+      );
+      expect(records).toHaveLength(1);
+      expect(records[0]?.level).toBe("warning");
+      expect(records[0]?.message.join("")).toMatch(
+        /OLLAMA_CONTEXT_LENGTH.*PARAMETER num_ctx/,
+      );
+      expect(JSON.stringify(body)).not.toContain("num_ctx");
+      expect(body["max_tokens"]).toBe(64);
+    } finally {
+      resetSync();
+    }
+  });
+
   test("an unconfigured reasoning override is omitted from the built request body", () => {
     const wrapped = createOllamaAdapter(source, {});
     const built = wrapped.buildRequest(messages, "gpt-oss:20b", options);
@@ -140,8 +173,8 @@ describe("createOllamaAdapter", () => {
 
   test("a per-model override beats the general default", () => {
     const wrapped = createOllamaAdapter(source, {
-      default: { numCtx: 8192 },
-      perModel: { "gpt-oss:20b": { numCtx: 65536 } },
+      default: { maxOutputTokens: 1024 },
+      perModel: { "gpt-oss:20b": { maxOutputTokens: 2048 } },
     });
     const forOverriddenModel = bodyOf(
       wrapped.buildRequest(messages, "gpt-oss:20b", options),
@@ -149,8 +182,8 @@ describe("createOllamaAdapter", () => {
     const forOtherModel = bodyOf(
       wrapped.buildRequest(messages, "qwen3.8:27b", options),
     );
-    expect(forOverriddenModel["options"]).toEqual({ num_ctx: 65536 });
-    expect(forOtherModel["options"]).toEqual({ num_ctx: 8192 });
+    expect(forOverriddenModel["max_tokens"]).toBe(2048);
+    expect(forOtherModel["max_tokens"]).toBe(1024);
   });
 
   test("preserves the built-in adapter's response parsing and header extractors", () => {
@@ -390,14 +423,6 @@ describe("createOllamaAnthropicAdapter", () => {
     const built = wrapped.buildRequest(messages, "gpt-oss:20b", options);
     expect(built.headers["authorization"]).toBe(BEARER_CREDENTIAL_SENTINEL);
     expect(built.headers).not.toHaveProperty("x-api-key");
-  });
-
-  test("does not overlay OpenAI-compat num_ctx onto the Anthropic body", () => {
-    const wrapped = createOllamaAnthropicAdapter(source, {
-      default: { numCtx: 32768 },
-    });
-    const body = bodyOf(wrapped.buildRequest(messages, "gpt-oss:20b", options));
-    expect(body).not.toHaveProperty("options");
   });
 
   test.each([
