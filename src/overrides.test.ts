@@ -20,27 +20,12 @@ describe("parseOllamaAdapterConfig", () => {
     ).toThrow();
   });
 
-  test("rejects a reasoningEffort outside the closed set", () => {
+  test("rejects the removed reasoningEffort and think fields", () => {
     expect(() =>
-      parseOllamaAdapterConfig({ default: { reasoningEffort: "extreme" } }),
+      parseOllamaAdapterConfig({ default: { reasoningEffort: "high" } }),
     ).toThrow();
-  });
-
-  test("accepts a boolean or effort-string think value", () => {
     expect(() =>
       parseOllamaAdapterConfig({ default: { think: true } }),
-    ).not.toThrow();
-    expect(() =>
-      parseOllamaAdapterConfig({ default: { think: "high" } }),
-    ).not.toThrow();
-    expect(() =>
-      parseOllamaAdapterConfig({ default: { think: "max" } }),
-    ).not.toThrow();
-  });
-
-  test("rejects a think value outside boolean or the closed effort set", () => {
-    expect(() =>
-      parseOllamaAdapterConfig({ default: { think: "extreme" } }),
     ).toThrow();
   });
 
@@ -76,23 +61,5 @@ describe("resolveOverride", () => {
       numCtx: 8192,
       maxOutputTokens: 1024,
     });
-  });
-
-  test("reasoningEffort resolves the same way", () => {
-    const config = parseOllamaAdapterConfig({
-      default: { reasoningEffort: "low" },
-      perModel: { "gpt-oss:20b": { reasoningEffort: "high" } },
-    });
-    expect(resolveOverride(config, "gpt-oss:20b").reasoningEffort).toBe("high");
-    expect(resolveOverride(config, "qwen3.8:27b").reasoningEffort).toBe("low");
-  });
-
-  test("think resolves the same way", () => {
-    const config = parseOllamaAdapterConfig({
-      default: { think: false },
-      perModel: { "gpt-oss:20b": { think: "high" } },
-    });
-    expect(resolveOverride(config, "gpt-oss:20b").think).toBe("high");
-    expect(resolveOverride(config, "qwen3.8:27b").think).toBe(false);
   });
 });

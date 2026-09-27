@@ -126,34 +126,26 @@ describe("createOllamaAdapter", () => {
     expect(body["max_tokens"]).toBe(2048);
   });
 
-  test("a configured reasoning effort appears in the built request body", () => {
-    const wrapped = createOllamaAdapter(source, {
-      default: { reasoningEffort: "high" },
-    });
-    const built = wrapped.buildRequest(messages, "gpt-oss:20b", options);
-    expect(bodyOf(built)["reasoning_effort"]).toBe("high");
-  });
+  test.each([
+    [true, "medium"],
+    [false, "none"],
+    ["low", "low"],
+    ["high", "high"],
+    ["max", "max"],
+  ] as const)(
+    "reasoning %p is sent as reasoning_effort %p",
+    (reasoning, effort) => {
+      const wrapped = createOllamaAdapter(source, { default: { reasoning } });
+      const body = bodyOf(wrapped.buildRequest(messages, "qwen3:8b", options));
+      expect(body["reasoning_effort"]).toBe(effort);
+      expect(body).not.toHaveProperty("think");
+    },
+  );
 
-  test("a configured think override appears in the built request body", () => {
-    const wrapped = createOllamaAdapter(source, {
-      default: { think: "high" },
-    });
-    const built = wrapped.buildRequest(messages, "gpt-oss:20b", options);
-    expect(bodyOf(built)["think"]).toBe("high");
-  });
-
-  test("a configured think: max override appears in the built request body", () => {
-    const wrapped = createOllamaAdapter(source, {
-      default: { think: "max" },
-    });
-    const built = wrapped.buildRequest(messages, "qwen3", options);
-    expect(bodyOf(built)["think"]).toBe("max");
-  });
-
-  test("an unconfigured think override is omitted from the built request body", () => {
+  test("an unconfigured reasoning override is omitted from the built request body", () => {
     const wrapped = createOllamaAdapter(source, {});
     const built = wrapped.buildRequest(messages, "gpt-oss:20b", options);
-    expect(bodyOf(built)).not.toHaveProperty("think");
+    expect(bodyOf(built)).not.toHaveProperty("reasoning_effort");
   });
 
   test("a per-model override beats the general default", () => {
@@ -289,6 +281,28 @@ describe("createOllamaAdapter", () => {
     });
   });
 
+  test("reasoning rejects a thinking budget at or above max_tokens", () => {
+    const wrapped = createOllamaAnthropicAdapter(source, {
+      default: { reasoning: true },
+    });
+    expect(() =>
+      wrapped.buildRequest(messages, "qwen3:8b", { maxTokens: 1024 }),
+    ).toThrow("budget_tokens (1024) must be below max_tokens (1024)");
+  });
+
+  test("reasoning keeps a caller-requested thinking budget", () => {
+    const wrapped = createOllamaAnthropicAdapter(source, {
+      default: { reasoning: "high" },
+    });
+    const body = bodyOf(
+      wrapped.buildRequest(messages, "qwen3:8b", {
+        maxTokens: 8192,
+        thinking: { enabled: true, budgetTokens: 4096 },
+      }),
+    );
+    expect(body["thinking"]).toEqual({ type: "enabled", budget_tokens: 4096 });
+  });
+
   test("buildRequest rejects a url-kind image_url", () => {
     const wrapped = createOllamaAdapter(source, undefined);
     const withUrlImage: ConversationTurn[] = [
@@ -390,11 +404,25 @@ describe("createOllamaAnthropicAdapter", () => {
 
   test("does not overlay OpenAI-compat num_ctx onto the Anthropic body", () => {
     const wrapped = createOllamaAnthropicAdapter(source, {
-      default: { numCtx: 32768, think: "high" },
+      default: { numCtx: 32768 },
     });
     const body = bodyOf(wrapped.buildRequest(messages, "gpt-oss:20b", options));
     expect(body).not.toHaveProperty("options");
+  });
+
+  test.each([
+    [false, { type: "disabled" }],
+    [true, { type: "enabled", budget_tokens: 1024 }],
+    ["low", { type: "enabled", budget_tokens: 1024 }],
+    ["max", { type: "enabled", budget_tokens: 1024 }],
+  ] as const)("reasoning %p is sent as thinking %p", (reasoning, thinking) => {
+    const wrapped = createOllamaAnthropicAdapter(source, {
+      default: { reasoning },
+    });
+    const body = bodyOf(wrapped.buildRequest(messages, "qwen3:8b", options));
+    expect(body["thinking"]).toEqual(thinking);
     expect(body).not.toHaveProperty("think");
+    expect(body).not.toHaveProperty("reasoning_effort");
   });
 
   test("buildRequest rejects a url-kind image_url", () => {
