@@ -1,6 +1,6 @@
 {
   "name": "@corbits/ollama-adapter",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Ollama as an Interchange inference provider: OpenAI-compatible and Anthropic messages factories, one reasoning setting, think-tag stripping, inline tool JSON repair.",
   "license": "LGPL-2.1-only",
   "author": "Sawyer Cutler <sawyer@dirtroad.dev>",
@@ -29,7 +29,8 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "bun test",
+    "test": "bun test src",
+    "test:e2e": "bun test e2e",
     "check": "bun run typecheck && bun run lint && bun run format:check && bun run test"
   },
   "dependencies": {
