@@ -274,7 +274,7 @@ export const createOllamaAdapter: AdapterFactory = (
  * {@link OllamaAdapterConfig} so a shared sidecar bag does not 400 the
  * stock Anthropic quirks validator; the values are unused on this path.
  *
- * Workbench catalog and Cloud sources already use a `/v1` base
+ * Local and Cloud sources already use a `/v1` base
  * (`http://localhost:11434/v1`, `https://ollama.com/v1`). The harness
  * concatenates `baseURL + built.url`, so this factory emits `/messages`
  * (matching OpenAI-compat `/chat/completions`) rather than stock
