@@ -88,6 +88,12 @@ async function stream(
   return events;
 }
 
+function usageOf(events: InferenceEvent[]): { input: number; output: number } {
+  const usage = events.find((event) => event.type === "inference.usage");
+  if (usage === undefined) throw new Error("expected a usage event");
+  return usage.data.usage;
+}
+
 function toolCallStartNames(events: InferenceEvent[]): string[] {
   return events.flatMap((event) =>
     event.type === "inference.tool_call.start" ? [event.data.name] : [],
@@ -143,6 +149,20 @@ for (const factory of factories) {
           thinking: { enabled: true, budgetTokens: 512 },
         });
         expect(events.length).toBeGreaterThan(0);
+      },
+      TIMEOUT_MS,
+    );
+
+    test.if(factory.provider === "ollama")(
+      "maxOutputTokens caps the completion",
+      async () => {
+        const adapter = factory.create(source, {
+          default: { maxOutputTokens: 16 },
+        });
+        const events = await stream(adapter, "Write a long story.", {
+          maxTokens: MAX_TOKENS,
+        });
+        expect(usageOf(events).output).toBeLessThanOrEqual(16);
       },
       TIMEOUT_MS,
     );

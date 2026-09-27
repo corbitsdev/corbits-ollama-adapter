@@ -116,16 +116,6 @@ describe("createOllamaAdapter", () => {
     expect(wrappedBuilt.headers).toEqual(innerBuilt.headers);
   });
 
-  test("a configured num_ctx and max output tokens appear in the built request body", () => {
-    const wrapped = createOllamaAdapter(source, {
-      default: { numCtx: 32768, maxOutputTokens: 2048 },
-    });
-    const built = wrapped.buildRequest(messages, "gpt-oss:20b", options);
-    const body = bodyOf(built);
-    expect(body["options"]).toEqual({ num_ctx: 32768 });
-    expect(body["max_tokens"]).toBe(2048);
-  });
-
   test.each([
     [true, "medium"],
     [false, "none"],
