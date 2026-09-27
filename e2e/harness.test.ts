@@ -44,9 +44,24 @@ afterEach(() => {
   harness = undefined;
 });
 
-async function runTurn(
+function runTurn(
   contents: string[],
   tools: ToolDefinition[],
+): Promise<InferenceEvent[]> {
+  return runChunks(
+    [
+      ...contents.map((content) => wire.openai.chunk({ content })),
+      wire.openai.chunk({ finishReason: "stop" }),
+      wire.openai.done(),
+    ],
+    tools,
+  );
+}
+
+async function runChunks(
+  chunks: ReturnType<typeof wire.openai.chunk>[],
+  tools: ToolDefinition[],
+  abortAtMs?: number,
 ): Promise<InferenceEvent[]> {
   const current = setupHarness({
     adapters: await loadAdapterRegistry(
@@ -66,15 +81,15 @@ async function runTurn(
   }
   const response = current.scenario.createStream();
   current.scenario.whenRequestMatches(() => true, response);
-  const chunks = [
-    ...contents.map((content) => wire.openai.chunk({ content })),
-    wire.openai.chunk({ finishReason: "stop" }),
-    wire.openai.done(),
-  ];
   for (const [i, chunk] of chunks.entries()) {
     response.enqueueAt(i * 10, chunk);
   }
-  response.closeAt(chunks.length * 10);
+  const abort = new AbortController();
+  if (abortAtMs === undefined) {
+    response.closeAt(chunks.length * 10);
+  } else {
+    current.clock.schedule(abortAtMs, () => abort.abort());
+  }
 
   let seq = 0;
   const events: InferenceEvent[] = [];
@@ -92,6 +107,7 @@ async function runTurn(
       },
       inferenceOptions: { tools },
       nextSeq: () => seq++,
+      signal: abort.signal,
     })) {
       events.push(event);
     }
@@ -146,5 +162,58 @@ describe("createOllamaAdapter through the inference harness", () => {
       events.some((event) => event.type === "inference.tool_call.start"),
     ).toBe(false);
     expect(tokensOf(events, "inference.text.delta")).toBe(MEMORY_SEARCH_JSON);
+  });
+
+  test("a <think> tag split across chunks still streams as thinking", async () => {
+    const events = await runTurn(["<thi", "nk>secret</think>answer <"], []);
+    expect(tokensOf(events, "inference.thinking.delta")).toBe("secret");
+    expect(tokensOf(events, "inference.text.delta")).toBe("answer <");
+  });
+
+  test("held text that cannot be a tool call survives an abort", async () => {
+    const events = await runChunks(
+      [
+        wire.openai.chunk({ content: '{"answer": 4' }),
+        wire.openai.chunk({ content: "2, " }),
+      ],
+      [memorySearchTool],
+      50,
+    );
+    expectEvents(events).toMatchSequence([
+      { type: "inference.start" },
+      { type: "inference.text.delta" },
+      {
+        type: "inference.error",
+        data: {
+          error: { category: "aborted" },
+          partial: { text: '{"answer": 42, ' },
+        },
+      },
+    ]);
+  });
+
+  test("an error chunk mid-stream fails the turn", async () => {
+    const events = await runChunks(
+      [
+        wire.openai.chunk({ content: "Hel" }),
+        wire.openai.chunk({
+          extra: { error: { message: "runner crashed" } },
+        }),
+        wire.openai.done(),
+      ],
+      [],
+    );
+    expectEvents(events).toMatchSequence([
+      { type: "inference.start" },
+      { type: "inference.text.delta" },
+      {
+        type: "inference.error",
+        data: {
+          error: { category: "protocol_mismatch" },
+          partial: { text: "Hel" },
+        },
+      },
+    ]);
+    expect(events.some((event) => event.type === "inference.done")).toBe(false);
   });
 });

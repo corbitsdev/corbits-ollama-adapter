@@ -42,6 +42,11 @@ export type ThinkSplitState = {
    * swallowed as thinking while waiting for `</think>`; leftover close
    * tags are still stripped so they cannot leak. */
   nativeThinkingSeen: boolean;
+  /** A trailing partial `<think>` or `</think>` held until the next token
+   * shows whether it completes the tag. */
+  pending: string;
+  /** Index of the last text delta, for releasing `pending` as text. */
+  textIndex: number | undefined;
 };
 
 export function createThinkSplitState(): ThinkSplitState {
@@ -51,6 +56,8 @@ export function createThinkSplitState(): ThinkSplitState {
     textAcc: "",
     thinkingAcc: "",
     nativeThinkingSeen: false,
+    pending: "",
+    textIndex: undefined,
   };
 }
 
@@ -72,13 +79,21 @@ type TokenSplit = {
   readonly thinkingToken: string;
 };
 
+/** Length of the longest proper prefix of `tag` that `text` ends with. */
+function partialTagLength(text: string, tag: string): number {
+  for (let n = Math.min(tag.length - 1, text.length); n > 0; n--) {
+    if (text.endsWith(tag.slice(0, n))) return n;
+  }
+  return 0;
+}
+
 /** Peels `<think>`/`</think>` spans out of one token, folding the result
- * into the running cumulative text/thinking strings. A tag never splits
- * across two tokens in practice, but a token straddling the tag boundary
- * (open and content in the same token, or close and content) is still
- * handled correctly by looping until the whole token is consumed. */
+ * into the running cumulative text/thinking strings. A token straddling a
+ * tag boundary is handled by looping until the whole token is consumed, and
+ * a tag split across tokens is completed from `state.pending`. */
 function splitToken(state: ThinkSplitState, token: string): TokenSplit {
-  let remaining = token;
+  let remaining = state.pending + token;
+  state.pending = "";
   let textToken = "";
   let thinkingToken = "";
 
@@ -86,7 +101,9 @@ function splitToken(state: ThinkSplitState, token: string): TokenSplit {
     if (!state.inThink) {
       const openIndex = remaining.indexOf(THINK_OPEN);
       if (openIndex === -1) {
-        textToken += remaining;
+        const held = partialTagLength(remaining, THINK_OPEN);
+        textToken += remaining.slice(0, remaining.length - held);
+        state.pending = remaining.slice(remaining.length - held);
         break;
       }
       textToken += remaining.slice(0, openIndex);
@@ -95,7 +112,9 @@ function splitToken(state: ThinkSplitState, token: string): TokenSplit {
     } else {
       const closeIndex = remaining.indexOf(THINK_CLOSE);
       if (closeIndex === -1) {
-        thinkingToken += remaining;
+        const held = partialTagLength(remaining, THINK_CLOSE);
+        thinkingToken += remaining.slice(0, remaining.length - held);
+        state.pending = remaining.slice(remaining.length - held);
         break;
       }
       thinkingToken += remaining.slice(0, closeIndex);
@@ -117,14 +136,67 @@ function splitToken(state: ThinkSplitState, token: string): TokenSplit {
  * mutated in place so a caller threads the same instance across every
  * chunk of one response.
  */
+function pushSplit(
+  output: InferenceEvent[],
+  state: ThinkSplitState,
+  { textToken, thinkingToken }: TokenSplit,
+  seq: number,
+): void {
+  const partial = {
+    text: state.textAcc,
+    ...(state.thinkingAcc !== "" ? { thinking: state.thinkingAcc } : {}),
+  };
+  if (thinkingToken !== "") {
+    output.push({
+      type: "inference.thinking.delta",
+      seq,
+      data: {
+        token: thinkingToken,
+        partial,
+        index: THINKING_BLOCK_INDEX,
+      },
+    });
+  }
+  if (textToken !== "") {
+    output.push({
+      type: "inference.text.delta",
+      seq,
+      data: {
+        token: textToken,
+        partial,
+        ...(state.textIndex !== undefined ? { index: state.textIndex } : {}),
+      },
+    });
+  }
+}
+
+/** Releases a held partial tag as the text or thinking it turned out to be. */
+function releasePending(
+  output: InferenceEvent[],
+  state: ThinkSplitState,
+  seq: number,
+): void {
+  if (state.pending === "") return;
+  const held = state.pending;
+  state.pending = "";
+  const split = state.inThink
+    ? { textToken: "", thinkingToken: held }
+    : { textToken: held, thinkingToken: "" };
+  state.textAcc += split.textToken;
+  state.thinkingAcc += split.thinkingToken;
+  pushSplit(output, state, split, seq);
+}
+
 export function reclassifyThinkingEvents(
   events: readonly InferenceEvent[],
   state: ThinkSplitState,
+  opts?: { flush?: boolean },
 ): InferenceEvent[] {
   const output: InferenceEvent[] = [];
 
   for (const event of events) {
     if (event.type === "inference.thinking.delta") {
+      releasePending(output, state, event.seq);
       state.nativeThinkingSeen = true;
       state.inThink = false;
       output.push(event);
@@ -159,42 +231,23 @@ export function reclassifyThinkingEvents(
     }
 
     const token = event.data.token;
-    if (!state.inThink && !state.everInThink && !token.includes(THINK_OPEN)) {
+    state.textIndex = event.data.index;
+    if (
+      !state.everInThink &&
+      state.pending === "" &&
+      !token.includes(THINK_OPEN) &&
+      partialTagLength(token, THINK_OPEN) === 0
+    ) {
+      state.textAcc += token;
       output.push(event);
       continue;
     }
     state.everInThink = true;
+    pushSplit(output, state, splitToken(state, token), event.seq);
+  }
 
-    const { textToken, thinkingToken } = splitToken(state, token);
-    const partial = {
-      text: state.textAcc,
-      ...(state.thinkingAcc !== "" ? { thinking: state.thinkingAcc } : {}),
-    };
-
-    if (thinkingToken !== "") {
-      output.push({
-        type: "inference.thinking.delta",
-        seq: event.seq,
-        data: {
-          token: thinkingToken,
-          partial,
-          index: THINKING_BLOCK_INDEX,
-        },
-      });
-    }
-    if (textToken !== "") {
-      output.push({
-        type: "inference.text.delta",
-        seq: event.seq,
-        data: {
-          token: textToken,
-          partial,
-          ...(event.data.index !== undefined
-            ? { index: event.data.index }
-            : {}),
-        },
-      });
-    }
+  if (opts?.flush === true) {
+    releasePending(output, state, 0);
   }
 
   return output;
