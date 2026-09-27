@@ -7,16 +7,10 @@
 // Ollama also serves Anthropic `/v1/messages` as a first-class surface
 // (docs.ollama.com/api/anthropic-compatibility.md). `createOllamaAnthropicAdapter`
 // wraps stock `createAnthropicAdapter` against that path; this OpenAI-compat
-// wrapper stays because that is where `options.num_ctx` and the
-// OpenAI-compat think-tag / inline-tool-JSON repairs live.
+// wrapper stays because that is where the OpenAI-compat think-tag /
+// inline-tool-JSON repairs live.
 //
-// Ollama's openai-compatible `/v1/chat/completions` endpoint takes
-// `max_tokens` (mapped internally to Ollama's native `num_predict`) but has
-// no OpenAI-shaped field for context window — that rides through the
-// endpoint's `options` passthrough object as `options.num_ctx`, exactly
-// like a native `/api/chat` call. A silently-dropped `num_ctx` (set on the
-// wrong field, or as a top-level key the endpoint ignores) is the failure
-// mode this adapter exists to rule out. The `reasoning` override rides
+// The `reasoning` override rides
 // through `reasoning_effort`, the only reasoning field this endpoint honors
 // (it ignores `think`).
 import {
@@ -140,10 +134,6 @@ function applyOverride(
   // usage object; the harness then synthesizes zero token counts that Insights
   // used to display as Cost $0.00 / 0/0.
   body["stream_options"] = { include_usage: true };
-  if (override.numCtx !== undefined) {
-    const options = isPlainObject(body["options"]) ? body["options"] : {};
-    body["options"] = { ...options, num_ctx: override.numCtx };
-  }
   if (override.maxOutputTokens !== undefined) {
     // The built-in adapter already set whichever of these two fields its
     // quirks resolved to; overwrite that same field rather than assuming
@@ -298,8 +288,7 @@ export const createOllamaAdapter: AdapterFactory = (
  * `SIDECAR_ADAPTER_MANIFEST` entry may name this export instead of
  * {@link createOllamaAdapter}. Wraps Interchange's stock
  * `createAnthropicAdapter` with no OpenAI-compat think-tag stripping,
- * inline-tool-JSON salvage, or `num_ctx` overlay — that surface has no
- * context-window field. Non-base64 images are rejected the same way as
+ * or inline-tool-JSON salvage. Non-base64 images are rejected the same way as
  * on the OpenAI-compat factory; Ollama's Anthropic surface only accepts
  * base64 image content. `quirks` is parsed as {@link OllamaAdapterConfig};
  * only `reasoning` applies on this path, as the Anthropic `thinking` field.
