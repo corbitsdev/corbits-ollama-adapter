@@ -67,6 +67,66 @@ function parseExactObject(text: string): ParseResult {
   }
 }
 
+const TOOL_CALL_KEYS = ["name", "parameters", "arguments", "id"];
+
+function someStartsWith(candidates: Iterable<string>, prefix: string): boolean {
+  for (const candidate of candidates) {
+    if (candidate.startsWith(prefix)) return true;
+  }
+  return false;
+}
+
+// Whether an incomplete JSON prefix can still grow into a declared tool
+// call: every top-level key must be a tool-call key and a `name` value must
+// be a declared tool name. Nested values are not inspected.
+function prefixCouldBeToolCall(
+  text: string,
+  declaredNames: ReadonlySet<string>,
+): boolean {
+  let depth = 0;
+  let str: string | null = null;
+  let escaped = false;
+  let atKey = false;
+  let key = "";
+  for (const ch of text) {
+    if (str !== null) {
+      if (escaped) {
+        escaped = false;
+        str += ch;
+      } else if (ch === "\\") {
+        escaped = true;
+      } else if (ch !== '"') {
+        str += ch;
+      } else {
+        if (depth === 1 && atKey) {
+          if (!TOOL_CALL_KEYS.includes(str)) return false;
+          key = str;
+          atKey = false;
+        } else if (depth === 1 && key === "name" && !declaredNames.has(str)) {
+          return false;
+        }
+        str = null;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      str = "";
+    } else if (ch === "{" || ch === "[") {
+      depth++;
+      if (depth === 1) atKey = true;
+    } else if (ch === "}" || ch === "]") {
+      depth--;
+    } else if (ch === "," && depth === 1) {
+      atKey = true;
+      key = "";
+    }
+  }
+  if (str === null || depth !== 1) return true;
+  if (atKey) return someStartsWith(TOOL_CALL_KEYS, str);
+  if (key === "name") return someStartsWith(declaredNames, str);
+  return true;
+}
+
 function salvageToolCall(
   value: Record<string, unknown>,
   declaredNames: ReadonlySet<string>,
@@ -197,6 +257,11 @@ function inspectHeldText(
 ): void {
   const parsed = parseExactObject(state.acc);
   if (parsed.kind === "incomplete") {
+    // Held text that can no longer be a tool call is released now, so an
+    // early close or abort keeps it.
+    if (!prefixCouldBeToolCall(state.acc.trim(), state.declaredNames)) {
+      releaseHeldAsText(output, state);
+    }
     return;
   }
   if (parsed.kind === "reject") {

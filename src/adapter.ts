@@ -15,6 +15,7 @@
 // (it ignores `think`).
 import {
   BEARER_CREDENTIAL_SENTINEL,
+  ProtocolMismatchError,
   type AdapterFactory,
   type BuiltRequest,
   type ProviderAdapter,
@@ -201,6 +202,29 @@ function ollamaTokenUsageFromChunk(raw: string): TokenUsage | null {
   }
 }
 
+// Ollama reports a mid-stream failure (a crashed runner, say) as a chunk with
+// an `error` object and no `choices`. The built-in parser reads that as an
+// empty delta, so the response would end as a truncated success.
+function rejectStreamError(sseData: string): void {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(sseData);
+  } catch {
+    // report-error-ignore: malformed JSON is the built-in parser's to report.
+    return;
+  }
+  if (!isPlainObject(parsed) || parsed["error"] === undefined) return;
+  const error = parsed["error"];
+  const message =
+    isPlainObject(error) && typeof error["message"] === "string"
+      ? error["message"]
+      : JSON.stringify(error);
+  throw new ProtocolMismatchError(
+    `@corbits/ollama-adapter: Ollama stream error: ${message}`,
+    sseData,
+  );
+}
+
 function withOllamaUsage(
   events: readonly InferenceEvent[],
   raw: string,
@@ -254,25 +278,30 @@ export const createOllamaAdapter: AdapterFactory = (
         resolveOverride(config, model),
       );
     },
-    parseResponse: (sseData) =>
-      withOllamaUsage(
+    parseResponse: (sseData) => {
+      rejectStreamError(sseData);
+      const flush = responseChunkIsTerminal(sseData);
+      return withOllamaUsage(
         reclassifyInlineToolJsonEvents(
           reclassifyThinkingEvents(
             inner.parseResponse(sseData),
             streamThinkState,
+            { flush },
           ),
           streamInlineState,
-          { flush: responseChunkIsTerminal(sseData) },
+          { flush },
         ),
         sseData,
         source,
-      ),
+      );
+    },
     parseJSONResponse: (body) =>
       withOllamaUsage(
         reclassifyInlineToolJsonEvents(
           reclassifyThinkingEvents(
             inner.parseJSONResponse(body),
             jsonThinkState,
+            { flush: true },
           ),
           jsonInlineState,
           { flush: true },
