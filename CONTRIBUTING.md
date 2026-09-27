@@ -2,7 +2,7 @@
 
 ## Packaging
 
-Bun >= 1.2 is the engines floor. The packed tarball ships compiled `dist/` (js + d.ts) built by `bun run build` (also wired as `prepack`); both Bun and native Node resolve the package through `dist` (`main`/`types` plus the `.` export's `default`/`types` conditions).
+Bun >= 1.2 and Node >= 24 are the engines floors. The packed tarball ships compiled `dist/` (js + d.ts) built by `bun run build` (also wired as `prepack`); both Bun and native Node resolve the package through `dist` (`main`/`types` plus the `.` export's `default`/`types` conditions).
 
 ## How it works
 
